@@ -1764,6 +1764,14 @@ extern "C"
 	FREERDP_API const char* freerdp_settings_get_name_for_key(size_t key);
 	FREERDP_API UINT32 freerdp_settings_get_codecs_flags(const rdpSettings* settings);
 
+	FREERDP_API BOOL freerdp_settings_set_value_for_name(rdpSettings* settings, const char* name,
+	                                                     const char* value);
+
+	FREERDP_API SSIZE_T freerdp_settings_get_key_for_name(const char* value);
+	FREERDP_API SSIZE_T freerdp_settings_get_type_for_name(const char* value);
+	FREERDP_API SSIZE_T freerdp_settings_get_type_for_key(size_t key);
+	FREERDP_API const char* freerdp_settings_get_name_for_key(size_t key);
+
 #ifdef __cplusplus
 }
 #endif

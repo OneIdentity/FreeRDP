@@ -210,8 +210,8 @@ BOOL freerdp_settings_get_bool(const rdpSettings* settings, size_t id)
 		case FreeRDP_GatewayBypassLocal:
 			return settings->GatewayBypassLocal;
 
-		case FreeRDP_GatewayEnabled:
-			return settings->GatewayEnabled;
+		case FreeRDP_JpegCodec:
+			return settings->JpegCodec;
 
 		case FreeRDP_GatewayHttpTransport:
 			return settings->GatewayHttpTransport;
@@ -219,8 +219,8 @@ BOOL freerdp_settings_get_bool(const rdpSettings* settings, size_t id)
 		case FreeRDP_GatewayHttpUseWebsockets:
 			return settings->GatewayHttpUseWebsockets;
 
-		case FreeRDP_GatewayRpcTransport:
-			return settings->GatewayRpcTransport;
+		case FreeRDP_LocalConnection:
+			return settings->LocalConnection;
 
 		case FreeRDP_GatewayUdpTransport:
 			return settings->GatewayUdpTransport;
@@ -321,8 +321,8 @@ BOOL freerdp_settings_get_bool(const rdpSettings* settings, size_t id)
 		case FreeRDP_MultiTouchInput:
 			return settings->MultiTouchInput;
 
-		case FreeRDP_NSCodec:
-			return settings->NSCodec;
+		case FreeRDP_RemoteFxOnly:
+			return settings->RemoteFxOnly;
 
 		case FreeRDP_NSCodecAllowDynamicColorFidelity:
 			return settings->NSCodecAllowDynamicColorFidelity;
@@ -372,20 +372,20 @@ BOOL freerdp_settings_get_bool(const rdpSettings* settings, size_t id)
 		case FreeRDP_RedirectClipboard:
 			return settings->RedirectClipboard;
 
-		case FreeRDP_RedirectDrives:
-			return settings->RedirectDrives;
+		case FreeRDP_ServerMode:
+			return settings->ServerMode;
 
-		case FreeRDP_RedirectHomeDrive:
-			return settings->RedirectHomeDrive;
+		case FreeRDP_SmartSizing:
+			return settings->SmartSizing;
 
 		case FreeRDP_RedirectParallelPorts:
 			return settings->RedirectParallelPorts;
 
-		case FreeRDP_RedirectPrinters:
-			return settings->RedirectPrinters;
+		case FreeRDP_SoftwareGdi:
+			return settings->SoftwareGdi;
 
-		case FreeRDP_RedirectSerialPorts:
-			return settings->RedirectSerialPorts;
+		case FreeRDP_SoundBeepsEnabled:
+			return settings->SoundBeepsEnabled;
 
 		case FreeRDP_RedirectSmartCards:
 			return settings->RedirectSmartCards;
@@ -1374,8 +1374,8 @@ UINT32 freerdp_settings_get_uint32(const rdpSettings* settings, size_t id)
 		case FreeRDP_ChannelDefArraySize:
 			return settings->ChannelDefArraySize;
 
-		case FreeRDP_ClientBuild:
-			return settings->ClientBuild;
+		case FreeRDP_CookieMaxLength:
+			return settings->CookieMaxLength;
 
 		case FreeRDP_ClientRandomLength:
 			return settings->ClientRandomLength;
@@ -1656,8 +1656,8 @@ UINT32 freerdp_settings_get_uint32(const rdpSettings* settings, size_t id)
 		case FreeRDP_StaticChannelArraySize:
 			return settings->StaticChannelArraySize;
 
-		case FreeRDP_StaticChannelCount:
-			return settings->StaticChannelCount;
+		case FreeRDP_SmartSizingWidth:
+			return settings->SmartSizingWidth;
 
 		case FreeRDP_TargetNetAddressCount:
 			return settings->TargetNetAddressCount;
@@ -2323,8 +2323,8 @@ const char* freerdp_settings_get_string(const rdpSettings* settings, size_t id)
 		case FreeRDP_CertificateAcceptedFingerprints:
 			return settings->CertificateAcceptedFingerprints;
 
-		case FreeRDP_CertificateContent:
-			return settings->CertificateContent;
+		case FreeRDP_PreconnectionBlob:
+			return settings->PreconnectionBlob;
 
 		case FreeRDP_CertificateFile:
 			return settings->CertificateFile;
@@ -2344,8 +2344,8 @@ const char* freerdp_settings_get_string(const rdpSettings* settings, size_t id)
 		case FreeRDP_ClientProductId:
 			return settings->ClientProductId;
 
-		case FreeRDP_ComputerName:
-			return settings->ComputerName;
+		case FreeRDP_RDP2TCPArgs:
+			return settings->RDP2TCPArgs;
 
 		case FreeRDP_ConfigPath:
 			return settings->ConfigPath;
@@ -2422,8 +2422,8 @@ const char* freerdp_settings_get_string(const rdpSettings* settings, size_t id)
 		case FreeRDP_PrivateKeyFile:
 			return settings->PrivateKeyFile;
 
-		case FreeRDP_ProxyHostname:
-			return settings->ProxyHostname;
+		case FreeRDP_RemoteApplicationFile:
+			return settings->RemoteApplicationFile;
 
 		case FreeRDP_ProxyPassword:
 			return settings->ProxyPassword;
@@ -2458,11 +2458,11 @@ const char* freerdp_settings_get_string(const rdpSettings* settings, size_t id)
 		case FreeRDP_RemoteApplicationCmdLine:
 			return settings->RemoteApplicationCmdLine;
 
-		case FreeRDP_RemoteApplicationFile:
-			return settings->RemoteApplicationFile;
+		case FreeRDP_RemoteApplicationWorkingDir:
+			return settings->RemoteApplicationWorkingDir;
 
-		case FreeRDP_RemoteApplicationGuid:
-			return settings->RemoteApplicationGuid;
+		case FreeRDP_RemoteAssistancePassStub:
+			return settings->RemoteAssistancePassStub;
 
 		case FreeRDP_RemoteApplicationIcon:
 			return settings->RemoteApplicationIcon;
@@ -2473,8 +2473,8 @@ const char* freerdp_settings_get_string(const rdpSettings* settings, size_t id)
 		case FreeRDP_RemoteApplicationProgram:
 			return settings->RemoteApplicationProgram;
 
-		case FreeRDP_RemoteApplicationWorkingDir:
-			return settings->RemoteApplicationWorkingDir;
+		case FreeRDP_RemoteAssistanceRCTicket:
+			return settings->RemoteAssistanceRCTicket;
 
 		case FreeRDP_RemoteAssistancePassStub:
 			return settings->RemoteAssistancePassStub;
