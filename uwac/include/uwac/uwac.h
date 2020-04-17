@@ -73,6 +73,13 @@ struct uwac_position
 	int y;
 };
 
+/** @brief a position */
+struct uwac_position
+{
+	int x;
+	int y;
+};
+
 /** @brief a rectangle size measure */
 struct uwac_size
 {
