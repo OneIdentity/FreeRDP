@@ -810,6 +810,9 @@ static UINT udevman_listener_created_callback(IUDEVMAN* iudevman)
 		return urbdrc_udevman_register_devices(udevman, udevman->devices_addr, TRUE);
 
 	return CHANNEL_RC_OK;
+err:
+	WLog_ERR(TAG, "Invalid device argument: \"%s\"", faulty_devices);
+	return COMMAND_LINE_ERROR_UNEXPECTED_VALUE;
 }
 
 static void udevman_load_interface(UDEVMAN* udevman)
