@@ -642,7 +642,6 @@ UINT dvcman_close_channel(IWTSVirtualChannelManager* pChannelMgr, UINT32 Channel
 			Stream_Write_UINT8(s, (CLOSE_REQUEST_PDU << 4) | 0x02);
 			Stream_Write_UINT32(s, ChannelId);
 			error = drdynvc_send(drdynvc, s);
-			Stream_Release(s);
 		}
 	}
 
@@ -786,7 +785,6 @@ static UINT drdynvc_send(drdynvcPlugin* drdynvc, wStream* s)
 	switch (status)
 	{
 		case CHANNEL_RC_OK:
-			Stream_AddRef(s);
 			return CHANNEL_RC_OK;
 
 		case CHANNEL_RC_NOT_CONNECTED:
