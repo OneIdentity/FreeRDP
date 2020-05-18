@@ -289,6 +289,7 @@ static int testSuccess(int port)
 
 fail:
 	free(exe);
+	free(wexe);
 	free(path);
 	free(wpath);
 	free(commandLine);
