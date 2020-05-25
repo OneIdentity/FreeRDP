@@ -551,6 +551,7 @@ fail:
 	ntlm_free_message_fields_buffer(&(message->TargetName));
 	status = SEC_I_CONTINUE_NEEDED;
 fail:
+	ntlm_free_message_fields_buffer(&(message->TargetName));
 	Stream_Free(s, FALSE);
 	return status;
 }
