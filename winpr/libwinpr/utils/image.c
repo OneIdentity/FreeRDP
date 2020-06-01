@@ -135,11 +135,32 @@ BYTE* winpr_bitmap_construct_header(size_t width, size_t height, size_t bpp)
 	bi.biClrImportant = 0;
 	bi.biSize = (UINT32)sizeof(WINPR_BITMAP_INFO_HEADER);
 
-	if (!writeBitmapFileHeader(s, &bf))
+	if (!writeBitmapInfoHeader(&s, &bi))
 		goto fail;
 
-	if (!writeBitmapInfoHeader(s, &bi))
-		goto fail;
+	return buffer;
+fail:
+	return NULL;
+}
+
+/**
+ * Refer to "Compressed Image File Formats: JPEG, PNG, GIF, XBM, BMP" book
+ */
+
+int winpr_bitmap_write(const char* filename, const BYTE* data, int width, int height, int bpp)
+{
+	FILE* fp;
+	BYTE* bmp_header = NULL;
+	UINT32 img_size = width * height * (bpp / 8);
+
+	int ret = -1;
+	fp = fopen(filename, "w+b");
+
+	if (!fp)
+	{
+		WLog_ERR(TAG, "failed to open file %s", filename);
+		return -1;
+	}
 
 	result = Stream_Buffer(s);
 fail:
