@@ -31,9 +31,6 @@ void mappedGeometryRef(MAPPED_GEOMETRY* g)
 
 void mappedGeometryUnref(MAPPED_GEOMETRY* g)
 {
-	if (!g)
-		return;
-
 	if (InterlockedDecrement(&g->refCounter))
 		return;
 
