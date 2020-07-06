@@ -304,6 +304,12 @@ else()
 	CHECK_SYMBOL_EXISTS(strndup string.h HAVE_STRNDUP)
 endif()
 
+set(THREAD_PREFER_PTHREAD_FLAG TRUE)
+
+if(NOT IOS)
+	find_package(Threads REQUIRED)
+endif()
+
 # Enable address sanitizer, where supported and when required
 if(${CMAKE_C_COMPILER_ID} STREQUAL "Clang" OR CMAKE_COMPILER_IS_GNUCC)
 	CHECK_C_COMPILER_FLAG ("-fno-omit-frame-pointer" fno-omit-frame-pointer)
