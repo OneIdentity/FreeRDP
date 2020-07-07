@@ -508,6 +508,13 @@ static BOOL sendQueuedChannelData(pClientContext* pc)
 	return rc;
 }
 
+static BOOL pf_client_on_server_heartbeat(freerdp* instance, BYTE period, BYTE count1, BYTE count2)
+{
+	pClientContext* pc = (pClientContext*)instance->context;
+	pServerContext* ps = pc->pdata->ps;
+	return freerdp_heartbeat_send_heartbeat_pdu(ps->context.peer, period, count1, count2);
+}
+
 /**
  * Called after a RDP connection was successfully established.
  * Settings might have changed during negotiation of client / server feature
@@ -561,6 +568,8 @@ static BOOL pf_client_post_connect(freerdp* instance)
 
 	/* Send cached channel data */
 	sendQueuedChannelData(pc);
+
+	instance->heartbeat->ServerHeartbeat = pf_client_on_server_heartbeat;
 
 	/*
 	 * after the connection fully established and settings were negotiated with target server,
