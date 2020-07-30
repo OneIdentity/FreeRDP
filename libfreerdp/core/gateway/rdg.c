@@ -2123,6 +2123,25 @@ static BOOL rdg_process_service_message(rdpRdg* rdg, wStream* s)
 	                    GATEWAY_MESSAGE_SERVICE, TRUE, FALSE, msgLenBytes, msg);
 }
 
+static BOOL rdg_process_service_message(rdpRdg* rdg, wStream* s)
+{
+	const WCHAR* msg;
+	UINT16 msgLenBytes;
+	rdpContext* context = rdg->context;
+	assert(context);
+	assert(context->instance);
+
+	/* Read message string */
+	if (!rdg_read_http_unicode_string(s, &msg, &msgLenBytes))
+	{
+		WLog_ERR(TAG, "[%s] Failed to read string", __FUNCTION__);
+		return FALSE;
+	}
+
+	return IFCALLRESULT(TRUE, context->instance->PresentGatewayMessage, context->instance,
+	                    TSG_ASYNC_MESSAGE_SERVICE_MESSAGE, TRUE, FALSE, msgLenBytes, msg);
+}
+
 static BOOL rdg_process_unknown_packet(rdpRdg* rdg, int type)
 {
 	WINPR_UNUSED(rdg);
