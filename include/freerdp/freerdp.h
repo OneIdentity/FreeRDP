@@ -107,6 +107,10 @@ extern "C"
 		GW_AUTH_RPC
 	} rdp_auth_reason;
 
+/* Message types used by gateway messaging callback */
+#define GATEWAY_MESSAGE_CONSENT 1
+#define GATEWAY_MESSAGE_SERVICE 2
+
 	typedef BOOL (*pContextNew)(freerdp* instance, rdpContext* context);
 	typedef void (*pContextFree)(freerdp* instance, rdpContext* context);
 
