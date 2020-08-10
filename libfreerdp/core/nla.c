@@ -1202,7 +1202,7 @@ static int nla_server_authenticate(rdpNla* nla)
 
 			if (outputBuffer.cbBuffer != 0)
 			{
-				if (!nla_send(nla))
+				if (!nla_send(nla, "Server: Sending response"))
 				{
 					nla_buffer_free(nla);
 					goto fail;
@@ -1958,7 +1958,7 @@ static BOOL nla_client_write_nego_token(wStream* s, const SecBuffer* negoToken)
  * @param credssp
  */
 
-BOOL nla_send(rdpNla* nla)
+BOOL nla_send(rdpNla* nla, const char* msg)
 {
 	BOOL rc = FALSE;
 	wStream* s;
