@@ -904,6 +904,18 @@ cliprdr_client_file_contents_request(CliprdrClientContext* context,
 			return ERROR_INVALID_PARAMETER;
 	}
 
+	if (!cliprdr)
+		return ERROR_INTERNAL_ERROR;
+
+	if (!cliprdr->hasHugeFileSupport)
+	{
+		if (((UINT64)fileContentsRequest->cbRequested + fileContentsRequest->nPositionLow) >
+		    UINT32_MAX)
+			return ERROR_INVALID_PARAMETER;
+		if (fileContentsRequest->nPositionHigh != 0)
+			return ERROR_INVALID_PARAMETER;
+	}
+
 	s = cliprdr_packet_file_contents_request_new(fileContentsRequest);
 
 	if (!s)
