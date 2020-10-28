@@ -2630,6 +2630,12 @@ BOOL freerdp_settings_set_string_(rdpSettings* settings, size_t id, const char* 
 		case FreeRDP_KeyboardRemappingList:
 			return update_string(&settings->KeyboardRemappingList, cnv.cc, len, cleanup);
 
+		case FreeRDP_KeyboardRemappingList:
+			if (cleanup)
+				free(settings->KeyboardRemappingList);
+			settings->KeyboardRemappingList = (val ? _strdup(val) : NULL);
+			return (!val || settings->KeyboardRemappingList != NULL);
+
 		case FreeRDP_NtlmSamFile:
 			return update_string(&settings->NtlmSamFile, cnv.cc, len, cleanup);
 
