@@ -73,6 +73,12 @@ struct _rdpei_client_context
 	pcRdpeiPen PenUpdate;
 	pcRdpeiPen PenEnd;
 
+	pcRdpeiAddPen AddPen;
+
+	pcRdpeiPen PenBegin;
+	pcRdpeiPen PenUpdate;
+	pcRdpeiPen PenEnd;
+
 	pcRdpeiSuspendTouch SuspendTouch;
 	pcRdpeiResumeTouch ResumeTouch;
 

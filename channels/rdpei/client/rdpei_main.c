@@ -1181,6 +1181,18 @@ static UINT rdpei_touch_process(RdpeiClientContext* context, INT32 externalId, U
 		*contactId = contactIdlocal;
 	return error;
 }
+/**
+ * Function description
+ *
+ * @return 0 on success, otherwise a Win32 error code
+ */
+static UINT rdpei_touch_begin(RdpeiClientContext* context, INT32 externalId, INT32 x, INT32 y,
+                              INT32* contactId)
+{
+	return rdpei_touch_process(context, externalId,
+	                           CONTACT_FLAG_DOWN | CONTACT_FLAG_INRANGE | CONTACT_FLAG_INCONTACT, x,
+	                           y, contactId);
+}
 
 /**
  * Function description
