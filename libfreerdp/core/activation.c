@@ -313,6 +313,12 @@ BOOL rdp_recv_client_persistent_key_list_pdu(wStream* s)
 	/* Skip totalEntriesCacheX */
 	if (!Stream_SafeSeek(s, 10))
 		return FALSE;
+	/* Read numEntriesCacheX for variable length data in PDU */
+	for (x = 0; x < 5; x++)
+	{
+		Stream_Read_UINT16(s, cache);
+		count += cache;
+	}
 
 	Stream_Read_UINT8(s, flags);
 
