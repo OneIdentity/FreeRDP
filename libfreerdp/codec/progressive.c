@@ -2627,7 +2627,7 @@ int progressive_compress(PROGRESSIVE_CONTEXT* progressive, const BYTE* pSrcData,
 	RFX_RECT* rects = NULL;
 	RFX_MESSAGE* message;
 
-	if (!progressive || !pSrcData || !ppDstData || !pDstSize || !invalidRegion)
+	if (!progressive || !pSrcData || !ppDstData || !pDstSize)
 	{
 		return -1;
 	}
@@ -2654,8 +2654,17 @@ int progressive_compress(PROGRESSIVE_CONTEXT* progressive, const BYTE* pSrcData,
 	if (SrcSize < Height * ScanLine)
 		return -4;
 
-	numRects = (Width + 63) / 64;
-	numRects *= (Height + 63) / 64;
+	if (!invalidRegion)
+	{
+		numRects = (Width + 63) / 64;
+		numRects *= (Height + 63) / 64;
+	}
+	else
+		numRects = region16_n_rects(invalidRegion);
+
+	if (numRects == 0)
+		return 0;
+
 	if (!Stream_EnsureCapacity(progressive->rects, numRects * sizeof(RFX_RECT)))
 		return -5;
 	rects = (RFX_RECT*)Stream_Buffer(progressive->rects);
