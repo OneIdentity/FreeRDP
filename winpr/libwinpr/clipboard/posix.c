@@ -27,6 +27,7 @@
 #endif
 
 #define _FILE_OFFSET_BITS 64
+#define WIN32_FILETIME_TO_UNIX_EPOCH UINT64_C(11644473600)
 
 #if defined(__clang__)
 #pragma clang diagnostic pop
@@ -521,6 +522,8 @@ static BOOL convert_local_file_to_filedescriptor(const struct posix_file* file,
 		descriptor->nFileSizeLow = (file->size >> 0) & 0xFFFFFFFF;
 		descriptor->nFileSizeHigh = (file->size >> 32) & 0xFFFFFFFF;
 	}
+	descriptor->ftLastWriteTime.dwLowDateTime = (file->last_write_time >> 0) & 0xFFFFFFFF;
+	descriptor->ftLastWriteTime.dwHighDateTime = (file->last_write_time >> 32) & 0xFFFFFFFF;
 
 	descriptor->ftLastWriteTime.dwLowDateTime = (file->last_write_time >> 0) & 0xFFFFFFFF;
 	descriptor->ftLastWriteTime.dwHighDateTime = (file->last_write_time >> 32) & 0xFFFFFFFF;
