@@ -419,6 +419,12 @@ const char* rpc_error_to_category(UINT32 code)
 			return current->category;
 	}
 
+	for (index = 0; RPC_TSG_FAULT_CODES[index].category != NULL; index++)
+	{
+		if (RPC_TSG_FAULT_CODES[index].code == HRESULT_CODE(code))
+			return RPC_TSG_FAULT_CODES[index].category;
+	}
+
 	return "UNKNOWN";
 }
 
