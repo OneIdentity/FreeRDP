@@ -1133,7 +1133,6 @@ static INLINE BOOL read_order_field_uint32(const ORDER_INFO* orderInfo, wStream*
 static INLINE BOOL read_order_field_coord(const ORDER_INFO* orderInfo, wStream* s, UINT32 NO,
                                           INT32* TARGET, BOOL optional)
 {
-	const BOOL set = (orderInfo->fieldFlags & (1 << (NO - 1)));
 	if (!TARGET || !orderInfo)
 		return FALSE;
 	if (!order_field_flag_is_set(orderInfo, NO))
