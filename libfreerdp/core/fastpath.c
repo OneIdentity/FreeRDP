@@ -932,6 +932,7 @@ BOOL fastpath_send_multiple_input_pdu(rdpFastPath* fastpath, wStream* s, size_t 
 
 	if (!fastpath)
 		goto fail;
+	}
 
 	rdp = fastpath->rdp;
 	WINPR_ASSERT(rdp);
