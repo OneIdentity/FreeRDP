@@ -1813,7 +1813,7 @@ static LONG smartcard_GetAttrib_Call(SMARTCARD_DEVICE* smartcard, SMARTCARD_OPER
 	BOOL autoAllocate = FALSE;
 	LONG status;
 	DWORD cbAttrLen = 0;
-	LPBYTE pbAttr = NULL;
+	LPBYTE* ppbAttr = NULL;
 	GetAttrib_Return ret = { 0 };
 	IRP* irp = operation->irp;
 	const GetAttrib_Call* call = &operation->call.getAttrib;
@@ -1833,7 +1833,8 @@ static LONG smartcard_GetAttrib_Call(SMARTCARD_DEVICE* smartcard, SMARTCARD_OPER
 		pbAttr = autoAllocate ? (LPBYTE) & (ret.pbAttr) : ret.pbAttr;
 	}
 
-	ret.ReturnCode = SCardGetAttrib(operation->hCard, call->dwAttrId, pbAttr, &cbAttrLen);
+	ret.ReturnCode = SCardGetAttrib(operation->hCard, call->dwAttrId, *ppbAttr, &cbAttrLen);
+
 	log_status_error(TAG, "SCardGetAttrib", ret.ReturnCode);
 	ret.cbAttrLen = cbAttrLen;
 
