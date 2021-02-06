@@ -244,6 +244,7 @@ static LONG smartcard_EstablishContext_Decode(SMARTCARD_DEVICE* smartcard,
 	{
 		return log_status_error(TAG, "smartcard_unpack_establish_context_call", status);
 	}
+	operation->call.establishContext = call;
 
 	return SCARD_S_SUCCESS;
 }
