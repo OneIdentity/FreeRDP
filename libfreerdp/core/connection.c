@@ -1193,6 +1193,15 @@ int rdp_client_transition_to_state(rdpRdp* rdp, CONNECTION_STATE state)
 		PubSub_OnConnectionStateChange(context->pubSub, context, &stateEvent);
 	}
 
+	{
+		ConnectionStateChangeEventArgs stateEvent;
+		rdpContext* context = rdp->context;
+		EventArgsInit(&stateEvent, "libfreerdp");
+		stateEvent.state = rdp->state;
+		stateEvent.active = rdp->state == CONNECTION_STATE_ACTIVE;
+		PubSub_OnConnectionStateChange(context->pubSub, context, &stateEvent);
+	}
+
 	return status;
 }
 
