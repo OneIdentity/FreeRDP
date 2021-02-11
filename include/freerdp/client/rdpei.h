@@ -59,7 +59,6 @@ struct _rdpei_client_context
 	void* custom;
 
 	pcRdpeiGetVersion GetVersion;
-	pcRdpeiGetFeatures GetFeatures;
 
 	pcRdpeiAddContact AddContact;
 
@@ -73,6 +72,10 @@ struct _rdpei_client_context
 	pcRdpeiPen PenUpdate;
 	pcRdpeiPen PenEnd;
 
+	pcRdpeiSuspendTouch SuspendTouch;
+	pcRdpeiResumeTouch ResumeTouch;
+
+	pcRdpeiGetFeatures GetFeatures;
 	pcRdpeiAddPen AddPen;
 
 	pcRdpeiPen PenBegin;
