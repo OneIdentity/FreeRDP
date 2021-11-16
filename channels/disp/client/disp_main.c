@@ -335,9 +335,9 @@ static UINT disp_plugin_terminated(IWTSPlugin* pPlugin)
 		IWTSVirtualChannelManager* mgr = disp->listener_callback->channel_mgr;
 		if (mgr)
 			IFCALL(mgr->DestroyListener, mgr, disp->listener);
+		free(disp->listener_callback);
 	}
 
-	free(disp->listener_callback);
 	free(disp->iface.pInterface);
 	free(pPlugin);
 	return CHANNEL_RC_OK;
@@ -407,7 +407,7 @@ UINT DVCPluginEntry(IDRDYNVC_ENTRY_POINTS* pEntryPoints)
 		context->handle = (void*)disp;
 		context->SendMonitorLayout = disp_send_monitor_layout;
 		disp->iface.pInterface = (void*)context;
-		error = pEntryPoints->RegisterPlugin(pEntryPoints, "disp", (IWTSPlugin*)disp);
+		error = pEntryPoints->RegisterPlugin(pEntryPoints, "disp", &disp->iface);
 	}
 	else
 	{

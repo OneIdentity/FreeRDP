@@ -21,7 +21,17 @@
 #include "config.h"
 #endif
 
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wreserved-id-macro"
+#endif
+
 #define _FILE_OFFSET_BITS 64
+
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
+
 #define WIN32_FILETIME_TO_UNIX_EPOCH UINT64_C(11644473600)
 
 #include <stddef.h>
@@ -41,6 +51,7 @@
 #include <winpr/shell.h>
 #include <winpr/string.h>
 #include <winpr/wlog.h>
+#include <winpr/print.h>
 
 #include "clipboard.h"
 #include "posix.h"
@@ -94,6 +105,7 @@ error:
 	free(file);
 	return NULL;
 }
+static UINT posix_file_read_close(struct posix_file* file, BOOL force);
 
 static void free_posix_file(void* the_file)
 {
@@ -102,14 +114,7 @@ static void free_posix_file(void* the_file)
 	if (!file)
 		return;
 
-	if (file->fd >= 0)
-	{
-		if (close(file->fd) < 0)
-		{
-			int err = errno;
-			WLog_WARN(TAG, "failed to close fd %d: %s", file->fd, strerror(err));
-		}
-	}
+	posix_file_read_close(file, TRUE);
 
 	free(file->local_name);
 	free(file->remote_name);
@@ -365,7 +370,7 @@ static BOOL add_file_to_list(const char* local_name, const WCHAR* remote_name, w
 	if (!file)
 		return FALSE;
 
-	if (ArrayList_Add(files, file) < 0)
+	if (!ArrayList_Append(files, file))
 	{
 		free_posix_file(file);
 		return FALSE;
@@ -502,7 +507,7 @@ static BOOL convert_local_file_to_filedescriptor(const struct posix_file* file,
                                                  FILEDESCRIPTORW* descriptor)
 {
 	size_t remote_len = 0;
-	descriptor->dwFlags = FD_ATTRIBUTES | FD_FILESIZE | FD_WRITETIME | FD_PROGRESSUI;
+	descriptor->dwFlags = FD_ATTRIBUTES | FD_FILESIZE | FD_WRITESTIME | FD_PROGRESSUI;
 
 	if (file->is_directory)
 	{
@@ -516,6 +521,7 @@ static BOOL convert_local_file_to_filedescriptor(const struct posix_file* file,
 		descriptor->nFileSizeLow = (file->size >> 0) & 0xFFFFFFFF;
 		descriptor->nFileSizeHigh = (file->size >> 32) & 0xFFFFFFFF;
 	}
+
 	descriptor->ftLastWriteTime.dwLowDateTime = (file->last_write_time >> 0) & 0xFFFFFFFF;
 	descriptor->ftLastWriteTime.dwHighDateTime = (file->last_write_time >> 32) & 0xFFFFFFFF;
 
@@ -580,14 +586,50 @@ static void* convert_uri_list_to_filedescriptors(wClipboard* clipboard, UINT32 f
 	return descriptors;
 }
 
-static void* convert_filedescriptors_to_uri_list(wClipboard* clipboard, UINT32 formatId,
-                                                 const void* data, UINT32* pSize)
+static size_t count_special_chars(const WCHAR* str)
+{
+	size_t count = 0;
+	const WCHAR* start = (const WCHAR*)str;
+	while (*start)
+	{
+		if (*start == L'#' || *start == L'?' || *start == L'*' || *start == L'!' || *start == L'%')
+		{
+			count++;
+		}
+		start++;
+	}
+	return count;
+}
+
+static const char* stop_at_special_chars(const char* str)
+{
+	const char* start = (const char*)str;
+	while (*start)
+	{
+		if (*start == '#' || *start == '?' || *start == '*' || *start == '!' || *start == '%')
+		{
+			return start;
+		}
+		start++;
+	}
+	return NULL;
+}
+
+/* The universal converter from filedescriptors to different file lists */
+static void* convert_filedescriptors_to_file_list(wClipboard* clipboard, UINT32 formatId,
+                                                  const void* data, UINT32* pSize,
+                                                  const char* header, const char* lineprefix,
+                                                  const char* lineending, BOOL skip_last_lineending)
 {
 	const FILEDESCRIPTORW* descriptors;
 	UINT32 nrDescriptors = 0;
 	size_t count, x, alloc, pos, baseLength = 0;
 	const char* src = (const char*)data;
 	char* dst;
+	size_t header_len = strlen(header);
+	size_t lineprefix_len = strlen(lineprefix);
+	size_t lineending_len = strlen(lineending);
+	size_t decoration_len;
 
 	if (!clipboard || !data || !pSize)
 		return NULL;
@@ -615,51 +657,172 @@ static void* convert_filedescriptors_to_uri_list(wClipboard* clipboard, UINT32 f
 	if (formatId != ClipboardGetFormatId(clipboard, "FileGroupDescriptorW"))
 		return NULL;
 
-	alloc = 0;
+	/* Plus 1 for '/' between basepath and filename*/
+	decoration_len = lineprefix_len + lineending_len + baseLength + 1;
+	alloc = header_len;
 
-	/* Get total size of file names */
+	/* Get total size of file/folder names under first level folder only */
 	for (x = 0; x < count; x++)
-		alloc += _wcsnlen(descriptors[x].cFileName, ARRAYSIZE(descriptors[x].cFileName));
+	{
+		if (_wcschr(descriptors[x].cFileName, L'\\') == NULL)
+		{
+			size_t curLen = _wcsnlen(descriptors[x].cFileName, ARRAYSIZE(descriptors[x].cFileName));
+			alloc += WideCharToMultiByte(CP_UTF8, 0, descriptors[x].cFileName, (int)curLen, NULL, 0,
+			                             NULL, NULL);
+			/* # (1 char) -> %23 (3 chars) , the first char is replaced inplace */
+			alloc += count_special_chars(descriptors[x].cFileName) * 2;
+			if (skip_last_lineending && x == count - 1)
+				alloc += decoration_len - lineending_len;
+			else
+				alloc += decoration_len;
+		}
+	}
 
-	/* Append a prefix file:// and postfix \r\n for each file */
-	alloc += (sizeof("/\r\n") + baseLength) * count;
+	/* Append a prefix file:// and postfix \n for each file */
+	/* We need to keep last \n since snprintf is null terminated!!  */
+	alloc++;
 	dst = calloc(alloc, sizeof(char));
 
 	if (!dst)
 		return NULL;
 
-	pos = 0;
+	_snprintf(&dst[0], alloc, "%s", header);
+
+	pos = header_len;
 
 	for (x = 0; x < count; x++)
 	{
+		if (_wcschr(descriptors[x].cFileName, L'\\') != NULL)
+		{
+			continue;
+		}
 		int rc;
 		const FILEDESCRIPTORW* cur = &descriptors[x];
 		size_t curLen = _wcsnlen(cur->cFileName, ARRAYSIZE(cur->cFileName));
 		char* curName = NULL;
+		const char* stop_at = NULL;
+		const char* previous_at = NULL;
 		rc = ConvertFromUnicode(CP_UTF8, 0, cur->cFileName, (int)curLen, &curName, 0, NULL, NULL);
 
-		if (rc != (int)curLen)
-		{
-			free(curName);
-			free(dst);
-			return NULL;
-		}
-
-		rc = _snprintf(&dst[pos], alloc - pos, "%s/%s\r\n", clipboard->delegate.basePath, curName);
-		free(curName);
+		rc = _snprintf(&dst[pos], alloc - pos, "%s%s/", lineprefix, clipboard->delegate.basePath);
 
 		if (rc < 0)
 		{
 			free(dst);
 			return NULL;
 		}
+		pos += (size_t)rc;
+
+		previous_at = curName;
+		while ((stop_at = stop_at_special_chars(previous_at)) != NULL)
+		{
+			char* tmp = strndup(previous_at, stop_at - previous_at);
+			if (!tmp)
+			{
+				free(dst);
+				free(curName);
+				return NULL;
+			}
+			rc = _snprintf(&dst[pos], stop_at - previous_at + 1, "%s", tmp);
+			free(tmp);
+			if (rc < 0)
+			{
+				free(dst);
+				free(curName);
+				return NULL;
+			}
+			pos += (size_t)rc;
+			rc = _snprintf(&dst[pos], 4, "%%%x", *stop_at);
+			if (rc < 0)
+			{
+				free(dst);
+				free(curName);
+				return NULL;
+			}
+			pos += (size_t)rc;
+			previous_at = stop_at + 1;
+		}
+
+		if (skip_last_lineending && x == count - 1)
+			rc = _snprintf(&dst[pos], alloc - pos, "%s", previous_at);
+		else
+			rc = _snprintf(&dst[pos], alloc - pos, "%s%s", previous_at, lineending);
+
+		if (rc < 0)
+		{
+			free(dst);
+			free(curName);
+			return NULL;
+		}
+		free(curName);
 
 		pos += (size_t)rc;
 	}
 
+	winpr_HexDump(TAG, WLOG_DEBUG, (const BYTE*)dst, alloc);
 	*pSize = (UINT32)alloc;
 	clipboard->fileListSequenceNumber = clipboard->sequenceNumber;
 	return dst;
+}
+
+/* Prepend header of kde dolphin format to file list*/
+static void* convert_filedescriptors_to_uri_list(wClipboard* clipboard, UINT32 formatId,
+                                                 const void* data, UINT32* pSize)
+{
+	return convert_filedescriptors_to_file_list(clipboard, formatId, data, pSize, "",
+	                                            "file:", "\r\n", FALSE);
+}
+
+/* Prepend header of common gnome format to file list*/
+static void* convert_filedescriptors_to_gnome_copied_files(wClipboard* clipboard, UINT32 formatId,
+                                                           const void* data, UINT32* pSize)
+{
+	return convert_filedescriptors_to_file_list(clipboard, formatId, data, pSize, "copy\n",
+	                                            "file://", "\n", TRUE);
+}
+
+/* Prepend header of nautilus based filemanager's format to file list*/
+static void* convert_filedescriptors_to_nautilus_clipboard(wClipboard* clipboard, UINT32 formatId,
+                                                           const void* data, UINT32* pSize)
+{
+	/* Here Nemo (and Caja) have different behavior. They encounter error with the last \n . but
+	   nautilus needs it. So user have to skip Nemo's error dialog to continue. Caja has different
+	   TARGET , so it's easy to fix. see convert_filedescriptors_to_mate_copied_files
+
+	   The text based "x-special/nautilus-clipboard" type was introduced with GNOME 3.30 and
+	   was necessary for the desktop icons extension, as gnome-shell at that time only
+	   supported text based mime types for gnome extensions. With GNOME 3.38, gnome-shell got
+	   support for non-text based mime types for gnome extensions. With GNOME 40, nautilus reverted
+	   the mime type change to "x-special/gnome-copied-files" and removed support for the text based
+	   mime type. So, in the near future, change this behaviour in favor for Nemo and Caja.
+	*/
+	/*	see nautilus/src/nautilus-clipboard.c:convert_selection_data_to_str_list
+	    see nemo/libnemo-private/nemo-clipboard.c:nemo_clipboard_get_uri_list_from_selection_data
+	*/
+
+	return convert_filedescriptors_to_file_list(clipboard, formatId, data, pSize,
+	                                            "x-special/nautilus-clipboard\ncopy\n", "file://",
+	                                            "\n", FALSE);
+}
+
+static void* convert_filedescriptors_to_mate_copied_files(wClipboard* clipboard, UINT32 formatId,
+                                                          const void* data, UINT32* pSize)
+{
+
+	char* pDstData = (char*)convert_filedescriptors_to_file_list(clipboard, formatId, data, pSize,
+	                                                             "copy\n", "file://", "\n", FALSE);
+	if (!pDstData)
+	{
+		return pDstData;
+	}
+	/*  Replace last \n with \0
+	    see
+	   mate-desktop/caja/libcaja-private/caja-clipboard.c:caja_clipboard_get_uri_list_from_selection_data
+	*/
+
+	pDstData[*pSize - 1] = '\0';
+	*pSize = *pSize - 1;
+	return pDstData;
 }
 
 static BOOL register_file_formats_and_synthesizers(wClipboard* clipboard)
@@ -667,10 +830,35 @@ static BOOL register_file_formats_and_synthesizers(wClipboard* clipboard)
 	wObject* obj;
 	UINT32 file_group_format_id;
 	UINT32 local_file_format_id;
+	UINT32 local_gnome_file_format_id;
+	UINT32 local_mate_file_format_id;
+	UINT32 local_nautilus_file_format_id;
 	file_group_format_id = ClipboardRegisterFormat(clipboard, "FileGroupDescriptorW");
 	local_file_format_id = ClipboardRegisterFormat(clipboard, "text/uri-list");
 
-	if (!file_group_format_id || !local_file_format_id)
+	/*
+	    1. Gnome Nautilus based file manager (Nautilus only with version >= 3.30 AND < 40):
+	        TARGET: UTF8_STRING
+	        format: x-special/nautilus-clipboard\copy\n\file://path\n\0
+	    2. Kde Dolpin:
+	        TARGET: text/uri-list
+	        format: file:path\n\0
+	    3. Gnome and others (Unity/XFCE/Nautilus < 3.30/Nautilus >= 40):
+	        TARGET: x-special/gnome-copied-files
+	        format: copy\nfile://path\n\0
+	    4. Mate Caja:
+	        TARGET: x-special/mate-copied-files
+	        format: copy\nfile://path\n
+
+	    TODO: other file managers do not use previous targets and formats.
+	*/
+
+	local_gnome_file_format_id = ClipboardRegisterFormat(clipboard, "x-special/gnome-copied-files");
+	local_mate_file_format_id = ClipboardRegisterFormat(clipboard, "x-special/mate-copied-files");
+	local_nautilus_file_format_id = ClipboardRegisterFormat(clipboard, "UTF8_STRING");
+
+	if (!file_group_format_id || !local_file_format_id || !local_gnome_file_format_id ||
+	    !local_mate_file_format_id || !local_nautilus_file_format_id)
 		goto error;
 
 	clipboard->localFiles = ArrayList_New(FALSE);
@@ -679,8 +867,6 @@ static BOOL register_file_formats_and_synthesizers(wClipboard* clipboard)
 		goto error;
 
 	obj = ArrayList_Object(clipboard->localFiles);
-	if (!obj)
-		goto error;
 	obj->fnObjectFree = free_posix_file;
 
 	if (!ClipboardRegisterSynthesizer(clipboard, local_file_format_id, file_group_format_id,
@@ -689,6 +875,18 @@ static BOOL register_file_formats_and_synthesizers(wClipboard* clipboard)
 
 	if (!ClipboardRegisterSynthesizer(clipboard, file_group_format_id, local_file_format_id,
 	                                  convert_filedescriptors_to_uri_list))
+		goto error_free_local_files;
+
+	if (!ClipboardRegisterSynthesizer(clipboard, file_group_format_id, local_gnome_file_format_id,
+	                                  convert_filedescriptors_to_gnome_copied_files))
+		goto error_free_local_files;
+
+	if (!ClipboardRegisterSynthesizer(clipboard, file_group_format_id, local_mate_file_format_id,
+	                                  convert_filedescriptors_to_mate_copied_files))
+		goto error_free_local_files;
+	if (!ClipboardRegisterSynthesizer(clipboard, file_group_format_id,
+	                                  local_nautilus_file_format_id,
+	                                  convert_filedescriptors_to_nautilus_clipboard))
 		goto error_free_local_files;
 
 	return TRUE;
@@ -836,12 +1034,14 @@ error:
 	return ERROR_READ_FAULT;
 }
 
-static UINT posix_file_read_close(struct posix_file* file)
+UINT posix_file_read_close(struct posix_file* file, BOOL force)
 {
 	if (file->fd < 0)
 		return NO_ERROR;
 
-	if (file->offset == file->size)
+	/* Always force close the file. Clipboard might open hundreds of files
+	 * so avoid caching to prevent running out of available file descriptors */
+	if ((file->offset >= file->size) || force || TRUE)
 	{
 		WLog_VRB(TAG, "close file %d", file->fd);
 
@@ -876,12 +1076,9 @@ static UINT posix_file_get_range(struct posix_file* file, UINT64 offset, UINT32 
 	if (error)
 		goto out;
 
-	error = posix_file_read_close(file);
-
-	if (error)
-		goto out;
-
 out:
+
+	posix_file_read_close(file, (error != NO_ERROR) && (size > 0));
 	return error;
 }
 

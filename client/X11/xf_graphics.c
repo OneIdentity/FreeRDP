@@ -37,6 +37,7 @@
 
 #include "xf_graphics.h"
 #include "xf_gdi.h"
+#include "xf_event.h"
 
 #include <freerdp/log.h>
 #define TAG CLIENT_TAG("x11")
@@ -124,7 +125,7 @@ static BOOL xf_Bitmap_New(rdpContext* context, rdpBitmap* bitmap)
 
 		if ((INT64)depth != xfc->depth)
 		{
-			if (!(data = _aligned_malloc(bitmap->width * bitmap->height * 4, 16)))
+			if (!(data = _aligned_malloc(bitmap->width * bitmap->height * 4ULL, 16)))
 				goto unlock;
 
 			if (!freerdp_image_copy(data, gdi->dstFormat, 0, 0, 0, bitmap->width, bitmap->height,
@@ -233,7 +234,7 @@ static BOOL _xf_Pointer_GetCursorForCurrentScale(rdpContext* context, const rdpP
 	UINT32 CursorFormat;
 	xfContext* xfc = (xfContext*)context;
 	xfPointer* xpointer = (xfPointer*)pointer;
-	XcursorImage ci;
+	XcursorImage ci = { 0 };
 	rdpSettings* settings;
 	UINT32 xTargetSize;
 	UINT32 yTargetSize;
@@ -241,6 +242,8 @@ static BOOL _xf_Pointer_GetCursorForCurrentScale(rdpContext* context, const rdpP
 	double yscale;
 	size_t size;
 	int cursorIndex = -1;
+	UINT32 i;
+	void* tmp;
 
 	if (!context || !pointer || !context->gdi)
 		return FALSE;
@@ -255,7 +258,7 @@ static BOOL _xf_Pointer_GetCursorForCurrentScale(rdpContext* context, const rdpP
 	xTargetSize = pointer->width * xscale;
 	yTargetSize = pointer->height * yscale;
 
-	for (int i = 0; i < xpointer->nCursors; i++)
+	for (i = 0; i < xpointer->nCursors; i++)
 	{
 		if (xpointer->cursorWidths[i] == xTargetSize && xpointer->cursorHeights[i] == yTargetSize)
 		{
@@ -274,42 +277,49 @@ static BOOL _xf_Pointer_GetCursorForCurrentScale(rdpContext* context, const rdpP
 
 		if (xpointer->nCursors == xpointer->mCursors)
 		{
+			void* tmp2;
 			xpointer->mCursors = (xpointer->mCursors == 0 ? 1 : xpointer->mCursors * 2);
 
-			if (!(xpointer->cursorWidths = (UINT32*)realloc(xpointer->cursorWidths,
-			                                                sizeof(UINT32) * xpointer->mCursors)))
+			tmp2 = realloc(xpointer->cursorWidths, sizeof(UINT32) * xpointer->mCursors);
+			if (!tmp2)
 			{
 				xf_unlock_x11(xfc);
 				return FALSE;
 			}
-			if (!(xpointer->cursorHeights = (UINT32*)realloc(xpointer->cursorHeights,
-			                                                 sizeof(UINT32) * xpointer->mCursors)))
+			xpointer->cursorWidths = tmp2;
+
+			tmp2 = realloc(xpointer->cursorHeights, sizeof(UINT32) * xpointer->mCursors);
+			if (!tmp2)
 			{
 				xf_unlock_x11(xfc);
 				return FALSE;
 			}
-			if (!(xpointer->cursors =
-			          (Cursor*)realloc(xpointer->cursors, sizeof(Cursor) * xpointer->mCursors)))
+			xpointer->cursorHeights = (UINT32*)tmp2;
+
+			tmp2 = realloc(xpointer->cursors, sizeof(Cursor) * xpointer->mCursors);
+			if (!tmp2)
 			{
 				xf_unlock_x11(xfc);
 				return FALSE;
 			}
+			xpointer->cursors = (Cursor*)tmp2;
 		}
 
-		ZeroMemory(&ci, sizeof(ci));
 		ci.version = XCURSOR_IMAGE_VERSION;
 		ci.size = sizeof(ci);
 		ci.width = xTargetSize;
 		ci.height = yTargetSize;
 		ci.xhot = pointer->xPos * xscale;
 		ci.yhot = pointer->yPos * yscale;
-		size = ci.height * ci.width * GetBytesPerPixel(CursorFormat);
+		size = ci.height * ci.width * GetBytesPerPixel(CursorFormat) * 1ULL;
 
-		if (!(ci.pixels = (XcursorPixel*)_aligned_malloc(size, 16)))
+		tmp = _aligned_malloc(size, 16);
+		if (!tmp)
 		{
 			xf_unlock_x11(xfc);
 			return FALSE;
 		}
+		ci.pixels = (XcursorPixel*)tmp;
 
 		if (xscale != 1 || yscale != 1)
 		{
@@ -317,7 +327,7 @@ static BOOL _xf_Pointer_GetCursorForCurrentScale(rdpContext* context, const rdpP
 			                         (BYTE*)xpointer->cursorPixels, CursorFormat, 0, 0, 0,
 			                         pointer->width, pointer->height))
 			{
-				_aligned_free(ci.pixels);
+				_aligned_free(tmp);
 				xf_unlock_x11(xfc);
 				return FALSE;
 			}
@@ -332,8 +342,8 @@ static BOOL _xf_Pointer_GetCursorForCurrentScale(rdpContext* context, const rdpP
 		xpointer->cursorHeights[cursorIndex] = ci.height;
 		xpointer->cursors[cursorIndex] = XcursorImageLoadCursor(xfc->display, &ci);
 		xpointer->nCursors += 1;
-		if (xscale != 1 || yscale != 1)
-			_aligned_free(ci.pixels);
+
+		_aligned_free(tmp);
 
 		xf_unlock_x11(xfc);
 	}
@@ -390,7 +400,7 @@ static BOOL xf_Pointer_New(rdpContext* context, rdpPointer* pointer)
 	xpointer->nCursors = 0;
 	xpointer->mCursors = 0;
 
-	size = pointer->height * pointer->width * GetBytesPerPixel(CursorFormat);
+	size = pointer->height * pointer->width * GetBytesPerPixel(CursorFormat) * 1ULL;
 
 	if (!(xpointer->cursorPixels = (XcursorPixel*)_aligned_malloc(size, 16)))
 		return FALSE;
@@ -413,6 +423,7 @@ static BOOL xf_Pointer_New(rdpContext* context, rdpPointer* pointer)
 static void xf_Pointer_Free(rdpContext* context, rdpPointer* pointer)
 {
 #ifdef WITH_XCURSOR
+	UINT32 i;
 	xfContext* xfc = (xfContext*)context;
 	xfPointer* xpointer = (xfPointer*)pointer;
 
@@ -422,7 +433,7 @@ static void xf_Pointer_Free(rdpContext* context, rdpPointer* pointer)
 	free(xpointer->cursorWidths);
 	free(xpointer->cursorHeights);
 
-	for (int i = 0; i < xpointer->nCursors; i++)
+	for (i = 0; i < xpointer->nCursors; i++)
 	{
 		XFreeCursor(xfc->display, xpointer->cursors[i]);
 	}
@@ -521,6 +532,8 @@ static BOOL xf_Pointer_SetPosition(rdpContext* context, UINT32 x, UINT32 y)
 	if (xfc->remote_app && !xfc->focused)
 		return TRUE;
 
+	xf_adjust_coordinates_to_screen(xfc, &x, &y);
+
 	xf_lock_x11(xfc);
 
 	rc = XGetWindowAttributes(xfc->display, handle, &current);
@@ -541,7 +554,7 @@ static BOOL xf_Pointer_SetPosition(rdpContext* context, UINT32 x, UINT32 y)
 
 	rc = XWarpPointer(xfc->display, None, handle, 0, 0, 0, 0, x, y);
 	if (rc == 0)
-		WLog_WARN(TAG, "xf_Pointer_SetPosition: XWrapPointer==%d", rc);
+		WLog_WARN(TAG, "xf_Pointer_SetPosition: XWarpPointer==%d", rc);
 	tmp.event_mask = current.your_event_mask;
 	rc = XChangeWindowAttributes(xfc->display, handle, CWEventMask, &tmp);
 	if (rc == 0)
@@ -553,12 +566,12 @@ out:
 }
 
 /* Glyph Class */
-static BOOL xf_Glyph_New(rdpContext* context, const rdpGlyph* glyph)
+static BOOL xf_Glyph_New(rdpContext* context, rdpGlyph* glyph)
 {
 	int scanline;
 	XImage* image;
-	xfGlyph* xf_glyph;
-	xf_glyph = (xfGlyph*)glyph;
+	xfGlyph* xf_glyph = (xfGlyph*)glyph;
+
 	xfContext* xfc = (xfContext*)context;
 	xf_lock_x11(xfc);
 	scanline = (glyph->cx + 7) / 8;
@@ -592,9 +605,9 @@ static void xf_Glyph_Free(rdpContext* context, rdpGlyph* glyph)
 static BOOL xf_Glyph_Draw(rdpContext* context, const rdpGlyph* glyph, INT32 x, INT32 y, INT32 w,
                           INT32 h, INT32 sx, INT32 sy, BOOL fOpRedundant)
 {
-	xfGlyph* xf_glyph;
+	const xfGlyph* xf_glyph = (const xfGlyph*)glyph;
 	xfContext* xfc = (xfContext*)context;
-	xf_glyph = (xfGlyph*)glyph;
+
 	xf_lock_x11(xfc);
 
 	if (!fOpRedundant)
@@ -620,7 +633,6 @@ static BOOL xf_Glyph_BeginDraw(rdpContext* context, INT32 x, INT32 y, INT32 widt
                                UINT32 bgcolor, UINT32 fgcolor, BOOL fOpRedundant)
 {
 	xfContext* xfc = (xfContext*)context;
-	XRectangle rect;
 	XColor xbgcolor, xfgcolor;
 
 	if (!xf_decode_color(xfc, bgcolor, &xbgcolor))
@@ -629,10 +641,6 @@ static BOOL xf_Glyph_BeginDraw(rdpContext* context, INT32 x, INT32 y, INT32 widt
 	if (!xf_decode_color(xfc, fgcolor, &xfgcolor))
 		return FALSE;
 
-	rect.x = x;
-	rect.y = y;
-	rect.width = width;
-	rect.height = height;
 	xf_lock_x11(xfc);
 
 	if (!fOpRedundant)

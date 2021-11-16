@@ -28,6 +28,8 @@
 #include <libavcodec/avcodec.h>
 #include <libavutil/opt.h>
 
+#include "h264.h"
+
 #ifdef WITH_VAAPI
 #if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(55, 9, 0)
 #include <libavutil/hwcontext.h>
@@ -275,8 +277,6 @@ static int libavcodec_decompress(H264_CONTEXT* h264, const BYTE* pSrcData, UINT3
 		iStride[0] = sys->videoFrame->linesize[0];
 		iStride[1] = sys->videoFrame->linesize[1];
 		iStride[2] = sys->videoFrame->linesize[2];
-		h264->width = sys->videoFrame->width;
-		h264->height = sys->videoFrame->height;
 	}
 	else
 		return -2;
@@ -506,7 +506,10 @@ static BOOL libavcodec_init(H264_CONTEXT* h264)
 	}
 
 	h264->pSystemData = (void*)sys;
+
+#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(58, 137, 100)
 	avcodec_register_all();
+#endif
 
 	if (!h264->Compressor)
 	{

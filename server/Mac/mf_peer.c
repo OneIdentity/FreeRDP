@@ -158,7 +158,7 @@ static BOOL mf_peer_context_new(freerdp_peer* client, mfPeerContext* context)
 	if (!(context->info = mf_info_get_instance()))
 		return FALSE;
 
-	if (!(context->rfx_context = rfx_context_new(TRUE)))
+	if (!(context->rfx_context = rfx_context_new_ex(TRUE, client->settings->ThreadingFlags)))
 		goto fail_rfx_context;
 
 	context->rfx_context->mode = RLGR3;
@@ -351,11 +351,11 @@ static void* mf_peer_main_loop(void* arg)
 	client->settings->RefreshRect = FALSE;
 	client->PostConnect = mf_peer_post_connect;
 	client->Activate = mf_peer_activate;
-	client->input->SynchronizeEvent = mf_peer_synchronize_event;
-	client->input->KeyboardEvent = mf_input_keyboard_event; // mf_peer_keyboard_event;
-	client->input->UnicodeKeyboardEvent = mf_peer_unicode_keyboard_event;
-	client->input->MouseEvent = mf_input_mouse_event;
-	client->input->ExtendedMouseEvent = mf_input_extended_mouse_event;
+	client->context->input->SynchronizeEvent = mf_peer_synchronize_event;
+	client->context->input->KeyboardEvent = mf_input_keyboard_event; // mf_peer_keyboard_event;
+	client->context->input->UnicodeKeyboardEvent = mf_peer_unicode_keyboard_event;
+	client->context->input->MouseEvent = mf_input_mouse_event;
+	client->context->input->ExtendedMouseEvent = mf_input_extended_mouse_event;
 	// client->update->RefreshRect = mf_peer_refresh_rect;
 	client->update->SuppressOutput = mf_peer_suppress_output;
 	client->Initialize(client);

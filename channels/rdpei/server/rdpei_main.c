@@ -207,7 +207,6 @@ static UINT read_cs_ready_message(RdpeiServerContext* context, wStream* s)
 static UINT read_touch_contact_data(RdpeiServerContext* context, wStream* s,
                                     RDPINPUT_CONTACT_DATA* contactData)
 {
-	UINT16 tmp;
 	WINPR_UNUSED(context);
 	if (Stream_GetRemainingLength(s) < 1)
 	{
@@ -216,28 +215,25 @@ static UINT read_touch_contact_data(RdpeiServerContext* context, wStream* s,
 	}
 
 	Stream_Read_UINT8(s, contactData->contactId);
-	if (!rdpei_read_2byte_unsigned(s, &tmp) || !rdpei_read_4byte_signed(s, &contactData->x) ||
+	if (!rdpei_read_2byte_unsigned(s, &contactData->fieldsPresent) ||
+	    !rdpei_read_4byte_signed(s, &contactData->x) ||
 	    !rdpei_read_4byte_signed(s, &contactData->y) ||
 	    !rdpei_read_4byte_unsigned(s, &contactData->contactFlags))
 	{
 		WLog_ERR(TAG, "rdpei_read_ failed!");
 		return ERROR_INTERNAL_ERROR;
 	}
-	contactData->fieldsPresent = tmp;
 
 	if (contactData->fieldsPresent & CONTACT_DATA_CONTACTRECT_PRESENT)
 	{
-		INT16 tmp[4] = { 0 };
-		if (!rdpei_read_2byte_signed(s, &tmp[0]) || !rdpei_read_2byte_signed(s, &tmp[1]) ||
-		    !rdpei_read_2byte_signed(s, &tmp[2]) || !rdpei_read_2byte_signed(s, &tmp[3]))
+		if (!rdpei_read_2byte_signed(s, &contactData->contactRectLeft) ||
+		    !rdpei_read_2byte_signed(s, &contactData->contactRectTop) ||
+		    !rdpei_read_2byte_signed(s, &contactData->contactRectRight) ||
+		    !rdpei_read_2byte_signed(s, &contactData->contactRectBottom))
 		{
 			WLog_ERR(TAG, "rdpei_read_ failed!");
 			return ERROR_INTERNAL_ERROR;
 		}
-		contactData->contactRectLeft = tmp[0];
-		contactData->contactRectTop = tmp[1];
-		contactData->contactRectRight = tmp[2];
-		contactData->contactRectBottom = tmp[3];
 	}
 
 	if ((contactData->fieldsPresent & CONTACT_DATA_ORIENTATION_PRESENT) &&
@@ -277,27 +273,27 @@ static UINT read_pen_contact(RdpeiServerContext* context, wStream* s,
 		return ERROR_INTERNAL_ERROR;
 	}
 
-	if (contactData->fieldsPresent & PEN_CONTACT_PENFLAGS_PRESENT)
+	if (contactData->fieldsPresent & RDPINPUT_PEN_CONTACT_PENFLAGS_PRESENT)
 	{
 		if (!rdpei_read_4byte_unsigned(s, &contactData->penFlags))
 			return ERROR_INVALID_DATA;
 	}
-	if (contactData->fieldsPresent & PEN_CONTACT_PRESSURE_PRESENT)
+	if (contactData->fieldsPresent & RDPINPUT_PEN_CONTACT_PRESSURE_PRESENT)
 	{
 		if (!rdpei_read_4byte_unsigned(s, &contactData->pressure))
 			return ERROR_INVALID_DATA;
 	}
-	if (contactData->fieldsPresent & PEN_CONTACT_ROTATION_PRESENT)
+	if (contactData->fieldsPresent & RDPINPUT_PEN_CONTACT_ROTATION_PRESENT)
 	{
 		if (!rdpei_read_2byte_unsigned(s, &contactData->rotation))
 			return ERROR_INVALID_DATA;
 	}
-	if (contactData->fieldsPresent & PEN_CONTACT_TILTX_PRESENT)
+	if (contactData->fieldsPresent & RDPINPUT_PEN_CONTACT_TILTX_PRESENT)
 	{
 		if (!rdpei_read_2byte_signed(s, &contactData->tiltX))
 			return ERROR_INVALID_DATA;
 	}
-	if (contactData->fieldsPresent & PEN_CONTACT_TILTY_PRESENT)
+	if (contactData->fieldsPresent & RDPINPUT_PEN_CONTACT_TILTY_PRESENT)
 	{
 		if (!rdpei_read_2byte_signed(s, &contactData->tiltY))
 			return ERROR_INVALID_DATA;
@@ -314,16 +310,15 @@ static UINT read_pen_contact(RdpeiServerContext* context, wStream* s,
 static UINT read_touch_frame(RdpeiServerContext* context, wStream* s, RDPINPUT_TOUCH_FRAME* frame)
 {
 	UINT32 i;
-	UINT16 tmp;
 	RDPINPUT_CONTACT_DATA* contact;
 	UINT error;
 
-	if (!rdpei_read_2byte_unsigned(s, &tmp) || !rdpei_read_8byte_unsigned(s, &frame->frameOffset))
+	if (!rdpei_read_2byte_unsigned(s, &frame->contactCount) ||
+	    !rdpei_read_8byte_unsigned(s, &frame->frameOffset))
 	{
 		WLog_ERR(TAG, "rdpei_read_ failed!");
 		return ERROR_INTERNAL_ERROR;
 	}
-	frame->contactCount = tmp;
 
 	frame->contacts = contact = calloc(frame->contactCount, sizeof(RDPINPUT_CONTACT_DATA));
 	if (!frame->contacts)
@@ -598,20 +593,16 @@ UINT rdpei_server_handle_messages(RdpeiServerContext* context)
 	return error;
 }
 
-UINT rdpei_server_send_sc_ready(RdpeiServerContext* context, UINT32 version)
-{
-	return rdpei_server_send_sc_ready_ex(context, version, 0);
-}
-
 /**
  * Function description
  *
  * @return 0 on success, otherwise a Win32 error code
  */
-UINT rdpei_server_send_sc_ready_ex(RdpeiServerContext* context, UINT32 version, UINT32 features)
+UINT rdpei_server_send_sc_ready(RdpeiServerContext* context, UINT32 version, UINT32 features)
 {
 	ULONG written;
 	RdpeiServerPrivate* priv = context->priv;
+	UINT32 pduLen = 4;
 
 	if (priv->automataState != STATE_INITIAL)
 	{
@@ -621,14 +612,17 @@ UINT rdpei_server_send_sc_ready_ex(RdpeiServerContext* context, UINT32 version, 
 
 	Stream_SetPosition(priv->outputStream, 0);
 
-	if (!Stream_EnsureCapacity(priv->outputStream, RDPINPUT_HEADER_LENGTH + 4))
+	if (version >= RDPINPUT_PROTOCOL_V300)
+		pduLen += 4;
+
+	if (!Stream_EnsureCapacity(priv->outputStream, RDPINPUT_HEADER_LENGTH + pduLen))
 	{
 		WLog_ERR(TAG, "Stream_EnsureCapacity failed!");
 		return CHANNEL_RC_NO_MEMORY;
 	}
 
 	Stream_Write_UINT16(priv->outputStream, EVENTID_SC_READY);
-	Stream_Write_UINT32(priv->outputStream, RDPINPUT_HEADER_LENGTH + 4);
+	Stream_Write_UINT32(priv->outputStream, RDPINPUT_HEADER_LENGTH + pduLen);
 	Stream_Write_UINT32(priv->outputStream, version);
 	if (version >= RDPINPUT_PROTOCOL_V300)
 		Stream_Write_UINT32(priv->outputStream, features);

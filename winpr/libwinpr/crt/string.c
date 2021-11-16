@@ -23,7 +23,9 @@
 
 #include <errno.h>
 #include <stdio.h>
+#include <ctype.h>
 #include <wctype.h>
+#include <wchar.h>
 
 #include <winpr/crt.h>
 #include <winpr/endian.h>
@@ -130,31 +132,31 @@ size_t _wcsnlen(const WCHAR* str, size_t max)
 
 WCHAR* _wcschr(const WCHAR* str, WCHAR c)
 {
-	WCHAR* p = (WCHAR*)str;
+	const WCHAR* p = (const WCHAR*)str;
 	WCHAR value;
 	Data_Write_UINT16(&value, c);
 
 	while (*p && (*p != value))
 		p++;
 
-	return ((*p == value) ? p : NULL);
+	return ((*p == value) ? (WCHAR*)p : NULL);
 }
 
 /* _wcsrchr -> wcsrchr */
 
 WCHAR* _wcsrchr(const WCHAR* str, WCHAR c)
 {
-	WCHAR* p;
+	const WCHAR* p;
 	WCHAR ch;
 
 	if (!str)
 		return NULL;
 
-	for (p = (WCHAR*)0; (ch = *str); str++)
+	for (p = (const WCHAR*)0; (ch = *str); str++)
 		if (ch == c)
-			p = (WCHAR*)str;
+			p = (const WCHAR*)str;
 
-	return p;
+	return (WCHAR*)p;
 }
 
 char* strtok_s(char* strToken, const char* strDelimit, char** context)
@@ -225,7 +227,7 @@ LPSTR CharUpperA(LPSTR lpsz)
 		char c = *lpsz;
 
 		if ((c >= 'a') && (c <= 'z'))
-			c = c - 32;
+			c = c - 'a' + 'A';
 
 		*lpsz = c;
 		return lpsz;
@@ -234,7 +236,7 @@ LPSTR CharUpperA(LPSTR lpsz)
 	for (i = 0; i < length; i++)
 	{
 		if ((lpsz[i] >= 'a') && (lpsz[i] <= 'z'))
-			lpsz[i] = lpsz[i] - 32;
+			lpsz[i] = lpsz[i] - 'a' + 'A';
 	}
 
 	return lpsz;
@@ -242,8 +244,35 @@ LPSTR CharUpperA(LPSTR lpsz)
 
 LPWSTR CharUpperW(LPWSTR lpsz)
 {
-	WLog_ERR(TAG, "CharUpperW unimplemented!");
-	return (LPWSTR)NULL;
+	size_t i;
+	size_t length;
+
+	if (!lpsz)
+		return NULL;
+
+	length = _wcslen(lpsz);
+
+	if (length < 1)
+		return (LPWSTR)NULL;
+
+	if (length == 1)
+	{
+		WCHAR c = *lpsz;
+
+		if ((c >= L'a') && (c <= L'z'))
+			c = c - L'a' + L'A';
+
+		*lpsz = c;
+		return lpsz;
+	}
+
+	for (i = 0; i < length; i++)
+	{
+		if ((lpsz[i] >= L'a') && (lpsz[i] <= L'z'))
+			lpsz[i] = lpsz[i] - L'a' + L'A';
+	}
+
+	return lpsz;
 }
 
 DWORD CharUpperBuffA(LPSTR lpsz, DWORD cchLength)
@@ -256,7 +285,7 @@ DWORD CharUpperBuffA(LPSTR lpsz, DWORD cchLength)
 	for (i = 0; i < cchLength; i++)
 	{
 		if ((lpsz[i] >= 'a') && (lpsz[i] <= 'z'))
-			lpsz[i] = lpsz[i] - 32;
+			lpsz[i] = lpsz[i] - 'a' + 'A';
 	}
 
 	return cchLength;
@@ -295,7 +324,7 @@ LPSTR CharLowerA(LPSTR lpsz)
 		char c = *lpsz;
 
 		if ((c >= 'A') && (c <= 'Z'))
-			c = c + 32;
+			c = c - 'A' + 'a';
 
 		*lpsz = c;
 		return lpsz;
@@ -304,7 +333,7 @@ LPSTR CharLowerA(LPSTR lpsz)
 	for (i = 0; i < length; i++)
 	{
 		if ((lpsz[i] >= 'A') && (lpsz[i] <= 'Z'))
-			lpsz[i] = lpsz[i] + 32;
+			lpsz[i] = lpsz[i] - 'A' + 'a';
 	}
 
 	return lpsz;
@@ -312,8 +341,8 @@ LPSTR CharLowerA(LPSTR lpsz)
 
 LPWSTR CharLowerW(LPWSTR lpsz)
 {
-	WLog_ERR(TAG, "CharLowerW unimplemented!");
-	return (LPWSTR)NULL;
+	CharLowerBuffW(lpsz, _wcslen(lpsz));
+	return lpsz;
 }
 
 DWORD CharLowerBuffA(LPSTR lpsz, DWORD cchLength)
@@ -326,7 +355,7 @@ DWORD CharLowerBuffA(LPSTR lpsz, DWORD cchLength)
 	for (i = 0; i < cchLength; i++)
 	{
 		if ((lpsz[i] >= 'A') && (lpsz[i] <= 'Z'))
-			lpsz[i] = lpsz[i] + 32;
+			lpsz[i] = lpsz[i] - 'A' + 'a';
 	}
 
 	return cchLength;
@@ -357,8 +386,10 @@ BOOL IsCharAlphaA(CHAR ch)
 
 BOOL IsCharAlphaW(WCHAR ch)
 {
-	WLog_ERR(TAG, "IsCharAlphaW unimplemented!");
-	return 0;
+	if (((ch >= L'a') && (ch <= L'z')) || ((ch >= L'A') && (ch <= L'Z')))
+		return 1;
+	else
+		return 0;
 }
 
 BOOL IsCharAlphaNumericA(CHAR ch)
@@ -372,8 +403,11 @@ BOOL IsCharAlphaNumericA(CHAR ch)
 
 BOOL IsCharAlphaNumericW(WCHAR ch)
 {
-	WLog_ERR(TAG, "IsCharAlphaNumericW unimplemented!");
-	return 0;
+	if (((ch >= L'a') && (ch <= L'z')) || ((ch >= L'A') && (ch <= L'Z')) ||
+	    ((ch >= L'0') && (ch <= L'9')))
+		return 1;
+	else
+		return 0;
 }
 
 BOOL IsCharUpperA(CHAR ch)
@@ -386,8 +420,10 @@ BOOL IsCharUpperA(CHAR ch)
 
 BOOL IsCharUpperW(WCHAR ch)
 {
-	WLog_ERR(TAG, "IsCharUpperW unimplemented!");
-	return 0;
+	if ((ch >= L'A') && (ch <= L'Z'))
+		return 1;
+	else
+		return 0;
 }
 
 BOOL IsCharLowerA(CHAR ch)
@@ -400,8 +436,10 @@ BOOL IsCharLowerA(CHAR ch)
 
 BOOL IsCharLowerW(WCHAR ch)
 {
-	WLog_ERR(TAG, "IsCharLowerW unimplemented!");
-	return 0;
+	if ((ch >= L'a') && (ch <= L'z'))
+		return 1;
+	else
+		return 0;
 }
 
 int lstrlenA(LPCSTR lpString)
@@ -411,12 +449,12 @@ int lstrlenA(LPCSTR lpString)
 
 int lstrlenW(LPCWSTR lpString)
 {
-	LPWSTR p;
+	LPCWSTR p;
 
 	if (!lpString)
 		return 0;
 
-	p = (LPWSTR)lpString;
+	p = (LPCWSTR)lpString;
 
 	while (*p)
 		p++;

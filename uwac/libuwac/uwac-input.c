@@ -23,7 +23,9 @@
 #include "uwac-utils.h"
 
 #include <stdio.h>
+#include <inttypes.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <assert.h>
 #include <errno.h>
@@ -71,8 +73,8 @@ static struct wl_buffer* create_pointer_buffer(UwacSeat* seat, const void* src, 
 	wl_shm_pool_destroy(pool);
 
 	if (munmap(data, size) < 0)
-		fprintf(stderr, "%s: munmap(%p, %" PRIuz ") failed with [%d] %s\n", __FUNCTION__, data,
-		        size, errno, strerror(errno));
+		fprintf(stderr, "%s: munmap(%p, %zu) failed with [%d] %s\n", __func__, data, size, errno,
+		        strerror(errno));
 
 error_mmap:
 	close(fd);
@@ -85,13 +87,13 @@ static void on_buffer_release(void* data, struct wl_buffer* wl_buffer)
 	wl_buffer_destroy(wl_buffer);
 }
 
-const struct wl_buffer_listener buffer_release_listener = { on_buffer_release };
+static const struct wl_buffer_listener buffer_release_listener = { on_buffer_release };
 
 static UwacReturnCode set_cursor_image(UwacSeat* seat, uint32_t serial)
 {
 	struct wl_buffer* buffer = NULL;
 	struct wl_cursor* cursor;
-	struct wl_cursor_image* image;
+	struct wl_cursor_image* image = NULL;
 	struct wl_surface* surface = NULL;
 	int32_t x = 0, y = 0;
 	int buffer_add_listener_success = -1;
@@ -844,12 +846,37 @@ static void pointer_handle_axis(void* data, struct wl_pointer* pointer, uint32_t
 
 static void pointer_frame(void* data, struct wl_pointer* wl_pointer)
 {
-	/*UwacSeat *seat = data;*/
+	UwacPointerFrameEvent* event;
+	UwacSeat* seat = data;
+	UwacWindow* window = seat->pointer_focus;
+
+	if (!window)
+		return;
+
+	event = (UwacPointerFrameEvent*)UwacDisplayNewEvent(seat->display, UWAC_EVENT_POINTER_FRAME);
+	if (!event)
+		return;
+
+	event->seat = seat;
+	event->window = window;
 }
 
 static void pointer_axis_source(void* data, struct wl_pointer* wl_pointer, uint32_t axis_source)
 {
-	/*UwacSeat *seat = data;*/
+	UwacPointerSourceEvent* event;
+	UwacSeat* seat = data;
+	UwacWindow* window = seat->pointer_focus;
+
+	if (!window)
+		return;
+
+	event = (UwacPointerSourceEvent*)UwacDisplayNewEvent(seat->display, UWAC_EVENT_POINTER_SOURCE);
+	if (!event)
+		return;
+
+	event->seat = seat;
+	event->window = window;
+	event->axis_source = axis_source;
 }
 
 static void pointer_axis_stop(void* data, struct wl_pointer* wl_pointer, uint32_t time,
@@ -995,7 +1022,7 @@ UwacSeat* UwacSeatNew(UwacDisplay* d, uint32_t id, uint32_t version)
 	ret->xkb_context = xkb_context_new(0);
 	if (!ret->xkb_context)
 	{
-		fprintf(stderr, "%s: unable to allocate a xkb_context\n", __FUNCTION__);
+		fprintf(stderr, "%s: unable to allocate a xkb_context\n", __func__);
 		goto error_xkb_context;
 	}
 
@@ -1006,13 +1033,13 @@ UwacSeat* UwacSeatNew(UwacDisplay* d, uint32_t id, uint32_t version)
 	ret->repeat_timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC | TFD_NONBLOCK);
 	if (ret->repeat_timer_fd < 0)
 	{
-		fprintf(stderr, "%s: error creating repeat timer\n", __FUNCTION__);
+		fprintf(stderr, "%s: error creating repeat timer\n", __func__);
 		goto error_timer_fd;
 	}
 	ret->repeat_task.run = keyboard_repeat_func;
 	if (UwacDisplayWatchFd(d, ret->repeat_timer_fd, EPOLLIN, &ret->repeat_task) < 0)
 	{
-		fprintf(stderr, "%s: error polling repeat timer\n", __FUNCTION__);
+		fprintf(stderr, "%s: error polling repeat timer\n", __func__);
 		goto error_watch_timerfd;
 	}
 
@@ -1110,12 +1137,15 @@ UwacReturnCode UwacSeatInhibitShortcuts(UwacSeat* s, bool inhibit)
 		return UWAC_ERROR_CLOSED;
 
 	if (s->keyboard_inhibitor)
+	{
 		zwp_keyboard_shortcuts_inhibitor_v1_destroy(s->keyboard_inhibitor);
+		s->keyboard_inhibitor = NULL;
+	}
 	if (inhibit && s->display && s->display->keyboard_inhibit_manager)
 		s->keyboard_inhibitor = zwp_keyboard_shortcuts_inhibit_manager_v1_inhibit_shortcuts(
 		    s->display->keyboard_inhibit_manager, s->keyboard_focus->surface, s->seat);
 
-	if (!s->keyboard_inhibitor)
+	if (inhibit && !s->keyboard_inhibitor)
 		return UWAC_ERROR_INTERNAL;
 	return UWAC_SUCCESS;
 }

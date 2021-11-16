@@ -21,7 +21,16 @@
 #include "config.h"
 #endif
 
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wreserved-id-macro"
+#endif
+
 #define _NO_KSECDD_IMPORT_ 1
+
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 
 #include <winpr/sspi.h>
 
@@ -32,6 +41,11 @@
 #include <winpr/environment.h>
 
 #include "sspi.h"
+
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-prototypes"
+#endif
 
 static wLog* g_Log = NULL;
 
@@ -1062,7 +1076,7 @@ SECURITY_STATUS SEC_ENTRY sspi_VerifySignature(PCtxtHandle phContext, PSecBuffer
 	return status;
 }
 
-SecurityFunctionTableA sspi_SecurityFunctionTableA = {
+static const SecurityFunctionTableA sspi_SecurityFunctionTableA = {
 	1,                                /* dwVersion */
 	sspi_EnumerateSecurityPackagesA,  /* EnumerateSecurityPackages */
 	sspi_QueryCredentialsAttributesA, /* QueryCredentialsAttributes */
@@ -1093,7 +1107,7 @@ SecurityFunctionTableA sspi_SecurityFunctionTableA = {
 	sspi_SetContextAttributesA,       /* SetContextAttributes */
 };
 
-SecurityFunctionTableW sspi_SecurityFunctionTableW = {
+static const SecurityFunctionTableW sspi_SecurityFunctionTableW = {
 	1,                                /* dwVersion */
 	sspi_EnumerateSecurityPackagesW,  /* EnumerateSecurityPackages */
 	sspi_QueryCredentialsAttributesW, /* QueryCredentialsAttributes */
@@ -1123,3 +1137,7 @@ SecurityFunctionTableW sspi_SecurityFunctionTableW = {
 	sspi_DecryptMessage,              /* DecryptMessage */
 	sspi_SetContextAttributesW,       /* SetContextAttributes */
 };
+
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
