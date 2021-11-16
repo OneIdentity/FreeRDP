@@ -75,7 +75,7 @@ BOOL per_write_length(wStream* s, UINT16 length)
 	{
 		if (!Stream_EnsureRemainingCapacity(s, 1))
 			return FALSE;
-		Stream_Write_UINT8(s, length);
+		Stream_Write_UINT8(s, (UINT8)length);
 	}
 	return TRUE;
 }
@@ -347,7 +347,7 @@ BOOL per_write_enumerated(wStream* s, BYTE enumerated, BYTE count)
  * @return
  */
 
-BOOL per_read_object_identifier(wStream* s, BYTE oid[6])
+BOOL per_read_object_identifier(wStream* s, const BYTE oid[6])
 {
 	BYTE t12;
 	UINT16 length;
@@ -427,7 +427,7 @@ static void per_write_string(wStream* s, BYTE* str, int length)
  * @return
  */
 
-BOOL per_read_octet_string(wStream* s, BYTE* oct_str, UINT16 length, UINT16 min)
+BOOL per_read_octet_string(wStream* s, const BYTE* oct_str, UINT16 length, UINT16 min)
 {
 	UINT16 i;
 	UINT16 mlength;

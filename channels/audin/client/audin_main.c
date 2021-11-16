@@ -25,7 +25,7 @@
 #endif
 
 #include <errno.h>
-#include <assert.h>
+#include <winpr/assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -121,8 +121,9 @@ static UINT audin_channel_write_and_free(AUDIN_CHANNEL_CALLBACK* callback, wStre
 		return ERROR_INTERNAL_ERROR;
 
 	Stream_SealLength(out);
-	error =
-	    callback->channel->Write(callback->channel, Stream_Length(out), Stream_Buffer(out), NULL);
+	WINPR_ASSERT(Stream_Length(out) <= ULONG_MAX);
+	error = callback->channel->Write(callback->channel, (ULONG)Stream_Length(out),
+	                                 Stream_Buffer(out), NULL);
 
 	if (freeStream)
 		Stream_Free(out, TRUE);
@@ -415,22 +416,27 @@ static BOOL audin_open_device(AUDIN_PLUGIN* audin, AUDIN_CHANNEL_CALLBACK* callb
 	if (!supported)
 	{
 		/* Default sample rates supported by most backends. */
-		const UINT32 samplerates[] = { 96000, 48000, 44100, 22050 };
+		const UINT32 samplerates[] = { format.nSamplesPerSec, 96000, 48000, 44100, 22050 };
 		BOOL test = FALSE;
+		size_t x;
 
 		format.wFormatTag = WAVE_FORMAT_PCM;
 		format.wBitsPerSample = 16;
-		test = IFCALLRESULT(FALSE, audin->device->FormatSupported, audin->device, &format);
-		if (!test)
+		format.cbSize = 0;
+		for (x = 0; x < ARRAYSIZE(samplerates); x++)
 		{
-			size_t x;
-			for (x = 0; x < ARRAYSIZE(samplerates); x++)
+			size_t y;
+			format.nSamplesPerSec = samplerates[x];
+			for (y = audin->format->nChannels; y > 0; y--)
 			{
-				format.nSamplesPerSec = samplerates[x];
+				format.nChannels = y;
+				format.nBlockAlign = 2 * format.nChannels;
 				test = IFCALLRESULT(FALSE, audin->device->FormatSupported, audin->device, &format);
 				if (test)
 					break;
 			}
+			if (test)
+				break;
 		}
 		if (!test)
 			return FALSE;
@@ -444,11 +450,8 @@ static BOOL audin_open_device(AUDIN_PLUGIN* audin, AUDIN_CHANNEL_CALLBACK* callb
 		return FALSE;
 	}
 
-	if (!supported)
-	{
-		if (!freerdp_dsp_context_reset(audin->dsp_context, audin->format))
-			return FALSE;
-	}
+	if (!freerdp_dsp_context_reset(audin->dsp_context, audin->format, audin->FramesPerPacket))
+		return FALSE;
 
 	IFCALLRET(audin->device->Open, error, audin->device, audin_receive_wave_data, callback);
 
@@ -801,11 +804,10 @@ static UINT audin_register_device_plugin(IWTSPlugin* pPlugin, IAudinDevice* devi
  */
 static UINT audin_load_device_plugin(AUDIN_PLUGIN* audin, const char* name, const ADDIN_ARGV* args)
 {
-	PFREERDP_AUDIN_DEVICE_ENTRY entry;
 	FREERDP_AUDIN_DEVICE_ENTRY_POINTS entryPoints;
 	UINT error;
-	entry = (PFREERDP_AUDIN_DEVICE_ENTRY)freerdp_load_channel_addin_entry("audin", (LPSTR)name,
-	                                                                      NULL, 0);
+	const PFREERDP_AUDIN_DEVICE_ENTRY entry =
+	    (const PFREERDP_AUDIN_DEVICE_ENTRY)freerdp_load_channel_addin_entry("audin", name, NULL, 0);
 
 	if (entry == NULL)
 	{
@@ -815,7 +817,7 @@ static UINT audin_load_device_plugin(AUDIN_PLUGIN* audin, const char* name, cons
 		return ERROR_INVALID_FUNCTION;
 	}
 
-	entryPoints.plugin = (IWTSPlugin*)audin;
+	entryPoints.plugin = &audin->iface;
 	entryPoints.pRegisterAudinDevice = audin_register_device_plugin;
 	entryPoints.args = args;
 	entryPoints.rdpcontext = audin->rdpcontext;
@@ -872,7 +874,7 @@ BOOL audin_process_addin_args(AUDIN_PLUGIN* audin, const ADDIN_ARGV* args)
 {
 	int status;
 	DWORD flags;
-	COMMAND_LINE_ARGUMENT_A* arg;
+	const COMMAND_LINE_ARGUMENT_A* arg;
 	UINT error;
 	COMMAND_LINE_ARGUMENT_A audin_args[] = {
 		{ "sys", COMMAND_LINE_VALUE_REQUIRED, "<subsystem>", NULL, NULL, -1, NULL, "subsystem" },
@@ -942,7 +944,7 @@ BOOL audin_process_addin_args(AUDIN_PLUGIN* audin, const ADDIN_ARGV* args)
 		{
 			unsigned long val = strtoul(arg->Value, NULL, 0);
 
-			if ((errno != 0) || (val > UINT16_MAX))
+			if ((errno != 0) || (val < UINT16_MAX))
 				audin->fixed_format->nChannels = val;
 		}
 		CommandLineSwitchDefault(arg)
@@ -1001,8 +1003,8 @@ UINT DVCPluginEntry(IDRDYNVC_ENTRY_POINTS* pEntryPoints)
 		{ NULL, NULL }
 	};
 	struct SubsystemEntry* entry = &entries[0];
-	assert(pEntryPoints);
-	assert(pEntryPoints->GetPlugin);
+	WINPR_ASSERT(pEntryPoints);
+	WINPR_ASSERT(pEntryPoints->GetPlugin);
 	audin = (AUDIN_PLUGIN*)pEntryPoints->GetPlugin(pEntryPoints, "audin");
 
 	if (audin != NULL)
@@ -1095,11 +1097,11 @@ UINT DVCPluginEntry(IDRDYNVC_ENTRY_POINTS* pEntryPoints)
 		goto out;
 	}
 
-	error = pEntryPoints->RegisterPlugin(pEntryPoints, "audin", (IWTSPlugin*)audin);
+	error = pEntryPoints->RegisterPlugin(pEntryPoints, "audin", &audin->iface);
 	if (error == CHANNEL_RC_OK)
 		return error;
 
 out:
-	audin_plugin_terminated((IWTSPlugin*)audin);
+	audin_plugin_terminated(&audin->iface);
 	return error;
 }

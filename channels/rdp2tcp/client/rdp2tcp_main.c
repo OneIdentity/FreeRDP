@@ -18,18 +18,17 @@
  */
 
 #include <stdio.h>
-#include <assert.h>
+#include <winpr/assert.h>
 
 #include <winpr/file.h>
 #include <winpr/pipe.h>
 #include <winpr/thread.h>
 
 #include <freerdp/svc.h>
-
-#define RDP2TCP_CHAN_NAME "rdp2tcp"
+#include <freerdp/channels/rdp2tcp.h>
 
 #include <freerdp/log.h>
-#define TAG CLIENT_TAG(RDP2TCP_CHAN_NAME)
+#define TAG CLIENT_TAG(RDP2TCP_DVC_CHANNEL_NAME)
 
 static int const debug = 0;
 
@@ -50,7 +49,7 @@ typedef struct
 static int init_external_addin(Plugin* plugin)
 {
 	SECURITY_ATTRIBUTES saAttr;
-	STARTUPINFO siStartInfo;
+	STARTUPINFOA siStartInfo; /* Using ANSI type to match CreateProcessA */
 	PROCESS_INFORMATION procInfo;
 	saAttr.nLength = sizeof(SECURITY_ATTRIBUTES);
 	saAttr.bInheritHandle = TRUE;
@@ -183,6 +182,8 @@ static void closeChannel(Plugin* plugin)
 	if (debug)
 		puts("rdp2tcp closing channel");
 
+	WINPR_ASSERT(plugin);
+	WINPR_ASSERT(plugin->channelEntryPoints.pVirtualChannelCloseEx);
 	plugin->channelEntryPoints.pVirtualChannelCloseEx(plugin->initHandle, plugin->openHandle);
 }
 
@@ -287,8 +288,10 @@ static VOID VCAPITYPE VirtualChannelInitEventEx(LPVOID lpUserParam, LPVOID pInit
 			if (debug)
 				puts("rdp2tcp connected");
 
+			WINPR_ASSERT(plugin);
+			WINPR_ASSERT(plugin->channelEntryPoints.pVirtualChannelOpenEx);
 			if (plugin->channelEntryPoints.pVirtualChannelOpenEx(
-			        pInitHandle, &plugin->openHandle, RDP2TCP_CHAN_NAME,
+			        pInitHandle, &plugin->openHandle, RDP2TCP_DVC_CHANNEL_NAME,
 			        VirtualChannelOpenEventEx) != CHANNEL_RC_OK)
 				return;
 
@@ -321,15 +324,18 @@ BOOL VCAPITYPE VirtualChannelEntryEx(PCHANNEL_ENTRY_POINTS pEntryPoints, PVOID p
 		return FALSE;
 
 	pEntryPointsEx = (CHANNEL_ENTRY_POINTS_FREERDP_EX*)pEntryPoints;
-	assert(pEntryPointsEx->cbSize >= sizeof(CHANNEL_ENTRY_POINTS_FREERDP_EX) &&
-	       pEntryPointsEx->MagicNumber == FREERDP_CHANNEL_MAGIC_NUMBER);
+	WINPR_ASSERT(pEntryPointsEx->cbSize >= sizeof(CHANNEL_ENTRY_POINTS_FREERDP_EX) &&
+	             pEntryPointsEx->MagicNumber == FREERDP_CHANNEL_MAGIC_NUMBER);
 	plugin->initHandle = pInitHandle;
 	plugin->channelEntryPoints = *pEntryPointsEx;
 
 	if (init_external_addin(plugin) < 0)
+	{
+		free(plugin);
 		return FALSE;
+	}
 
-	strncpy(channelDef.name, RDP2TCP_CHAN_NAME, sizeof(channelDef.name));
+	strncpy(channelDef.name, RDP2TCP_DVC_CHANNEL_NAME, sizeof(channelDef.name));
 	channelDef.options =
 	    CHANNEL_OPTION_INITIALIZED | CHANNEL_OPTION_ENCRYPT_RDP | CHANNEL_OPTION_COMPRESS_RDP;
 

@@ -26,13 +26,11 @@
 #include <winpr/crt.h>
 #include <winpr/platform.h>
 #include <winpr/error.h>
+#include <winpr/string.h>
 
 #include <winpr/environment.h>
 
 #ifndef _WIN32
-
-#define stricmp strcasecmp
-#define strnicmp strncasecmp
 
 #include <winpr/crt.h>
 #include <winpr/platform.h>
@@ -82,10 +80,8 @@ DWORD GetCurrentDirectoryA(DWORD nBufferLength, LPSTR lpBuffer)
 
 		memcpy(lpBuffer, cwd, length + 1);
 		free(cwd);
-		return length;
+		return (DWORD)length;
 	}
-
-	return 0;
 }
 
 DWORD GetCurrentDirectoryW(DWORD nBufferLength, LPWSTR lpBuffer)
@@ -156,12 +152,12 @@ DWORD GetEnvironmentVariableA(LPCSTR lpName, LPSTR lpBuffer, DWORD nSize)
 	length = strlen(env);
 
 	if ((length + 1 > nSize) || (!lpBuffer))
-		return length + 1;
+		return (DWORD)length + 1;
 
 	CopyMemory(lpBuffer, env, length);
 	lpBuffer[length] = '\0';
 
-	return length;
+	return (DWORD)length;
 #else
 	SetLastError(ERROR_ENVVAR_NOT_FOUND);
 	return 0;
@@ -546,18 +542,20 @@ DWORD GetEnvironmentVariableEBA(LPCSTR envBlock, LPCSTR lpName, LPSTR lpBuffer, 
 		return 0;
 
 	vLength = strlen(env);
+	if (vLength >= UINT32_MAX)
+		return 0;
 
 	if ((vLength + 1 > nSize) || (!lpBuffer))
-		return vLength + 1;
+		return (DWORD)vLength + 1;
 
 	CopyMemory(lpBuffer, env, vLength + 1);
 
-	return vLength;
+	return (DWORD)vLength;
 }
 
 BOOL SetEnvironmentVariableEBA(LPSTR* envBlock, LPCSTR lpName, LPCSTR lpValue)
 {
-	int length;
+	size_t length;
 	char* envstr;
 	char* newEB;
 
@@ -566,7 +564,7 @@ BOOL SetEnvironmentVariableEBA(LPSTR* envBlock, LPCSTR lpName, LPCSTR lpValue)
 
 	if (lpValue)
 	{
-		length = (int)(strlen(lpName) + strlen(lpValue) + 2); /* +2 because of = and \0 */
+		length = (strlen(lpName) + strlen(lpValue) + 2);      /* +2 because of = and \0 */
 		envstr = (char*)malloc(length + 1);                   /* +1 because of closing \0 */
 
 		if (!envstr)
@@ -576,7 +574,7 @@ BOOL SetEnvironmentVariableEBA(LPSTR* envBlock, LPCSTR lpName, LPCSTR lpValue)
 	}
 	else
 	{
-		length = (int)strlen(lpName) + 2;   /* +2 because of = and \0 */
+		length = strlen(lpName) + 2;        /* +2 because of = and \0 */
 		envstr = (char*)malloc(length + 1); /* +1 because of closing \0 */
 
 		if (!envstr)

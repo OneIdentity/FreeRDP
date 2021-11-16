@@ -153,7 +153,7 @@ static const char* x11_event_string(int event)
 
 		default:
 			return "UNKNOWN";
-	};
+	}
 }
 
 #ifdef WITH_DEBUG_X11
@@ -178,8 +178,6 @@ BOOL xf_event_action_script_init(xfContext* xfc)
 		return FALSE;
 
 	obj = ArrayList_Object(xfc->xevents);
-	if (!obj)
-		return FALSE;
 	obj->fnObjectFree = free;
 	sprintf_s(command, sizeof(command), "%s xevent", xfc->context.settings->ActionScript);
 	actionScript = popen(command, "r");
@@ -193,7 +191,7 @@ BOOL xf_event_action_script_init(xfContext* xfc)
 		strtok_s(buffer, "\n", &context);
 		xevent = _strdup(buffer);
 
-		if (!xevent || ArrayList_Add(xfc->xevents, xevent) < 0)
+		if (!xevent || !ArrayList_Append(xfc->xevents, xevent))
 		{
 			pclose(actionScript);
 			ArrayList_Free(xfc->xevents);
@@ -508,7 +506,7 @@ static BOOL xf_event_KeyPress(xfContext* xfc, const XKeyEvent* event, BOOL app)
 	char str[256];
 	WINPR_UNUSED(app);
 	XLookupString((XKeyEvent*)event, str, sizeof(str), &keysym, NULL);
-	xf_keyboard_key_press(xfc, event->keycode, keysym);
+	xf_keyboard_key_press(xfc, event, keysym);
 	return TRUE;
 }
 
@@ -518,7 +516,7 @@ static BOOL xf_event_KeyRelease(xfContext* xfc, const XKeyEvent* event, BOOL app
 	char str[256];
 	WINPR_UNUSED(app);
 	XLookupString((XKeyEvent*)event, str, sizeof(str), &keysym, NULL);
-	xf_keyboard_key_release(xfc, event->keycode, keysym);
+	xf_keyboard_key_release(xfc, event, keysym);
 	return TRUE;
 }
 
@@ -765,7 +763,7 @@ static BOOL xf_event_MapNotify(xfContext* xfc, const XMapEvent* event, BOOL app)
 	{
 		appWindow = xf_AppWindowFromX11Window(xfc, event->window);
 
-		if (appWindow)
+		if (appWindow && (appWindow->rail_state == WINDOW_SHOW))
 		{
 			/* local restore event */
 			/* This is now handled as part of the PropertyNotify

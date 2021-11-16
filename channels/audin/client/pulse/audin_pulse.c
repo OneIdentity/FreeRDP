@@ -331,6 +331,8 @@ static void audin_pulse_stream_state_callback(pa_stream* stream, void* userdata)
 			pa_threaded_mainloop_signal(pulse->mainloop, 0);
 			break;
 
+		case PA_STREAM_UNCONNECTED:
+		case PA_STREAM_CREATING:
 		default:
 			break;
 	}
@@ -466,7 +468,7 @@ static UINT audin_pulse_parse_addin_args(AudinPulseDevice* device, const ADDIN_A
 {
 	int status;
 	DWORD flags;
-	COMMAND_LINE_ARGUMENT_A* arg;
+	const COMMAND_LINE_ARGUMENT_A* arg;
 	AudinPulseDevice* pulse = (AudinPulseDevice*)device;
 	COMMAND_LINE_ARGUMENT_A audin_pulse_args[] = { { "dev", COMMAND_LINE_VALUE_REQUIRED, "<device>",
 		                                             NULL, NULL, -1, NULL, "audio device name" },

@@ -21,7 +21,7 @@
 #include "config.h"
 #endif
 
-#include <assert.h>
+#include <winpr/assert.h>
 
 #include <winpr/crt.h>
 #include <winpr/synch.h>
@@ -38,6 +38,7 @@
 #include "../rdp.h"
 #include "../../crypto/opensslcompat.h"
 #include "rpc_fault.h"
+#include "../utils.h"
 
 #define TAG FREERDP_TAG("core.gateway.rdg")
 
@@ -309,10 +310,14 @@ static BOOL rdg_read_http_unicode_string(wStream* s, const WCHAR** string, UINT1
 {
 	WCHAR* str;
 	UINT16 strLenBytes;
+	size_t rem = Stream_GetRemainingLength(s);
 
 	/* Read length of the string */
-	if (Stream_GetRemainingLength(s) < 4)
+	if (rem < 4)
+	{
+		WLog_ERR(TAG, "[%s]: Could not read stream length, only have % " PRIuz " bytes", rem);
 		return FALSE;
+	}
 	Stream_Read_UINT16(s, strLenBytes);
 
 	/* Remember position of our string */
@@ -320,7 +325,12 @@ static BOOL rdg_read_http_unicode_string(wStream* s, const WCHAR** string, UINT1
 
 	/* seek past the string - if this fails something is wrong */
 	if (!Stream_SafeSeek(s, strLenBytes))
+	{
+		WLog_ERR(TAG,
+		         "[%s]: Could not read stream data, only have % " PRIuz " bytes, expected %" PRIu16,
+		         rem - 4, strLenBytes);
 		return FALSE;
+	}
 
 	/* return the string data (if wanted) */
 	if (string)
@@ -350,7 +360,10 @@ static BOOL rdg_write_chunked(BIO* bio, wStream* sPacket)
 	len = Stream_Length(sChunk);
 
 	if (len > INT_MAX)
+	{
+		Stream_Free(sChunk, TRUE);
 		return FALSE;
+	}
 
 	status = BIO_write(bio, Stream_Buffer(sChunk), (int)len);
 	Stream_Free(sChunk, TRUE);
@@ -551,11 +564,13 @@ static BOOL rdg_websocket_reply_close(BIO* bio, wStream* s)
 	{
 		uint16_t data;
 		Stream_Read_UINT16(s, data);
-		Stream_Write_UINT16(s, data ^ maskingKey1);
+		Stream_Write_UINT16(closeFrame, data ^ maskingKey1);
 	}
 	Stream_SealLength(closeFrame);
 
 	status = BIO_write(bio, Stream_Buffer(closeFrame), Stream_Length(closeFrame));
+	Stream_Free(closeFrame, TRUE);
+
 	/* server MUST close socket now. The server is not allowed anymore to
 	 * send frames but if he does, nothing bad would happen */
 	if (status < 0)
@@ -604,7 +619,6 @@ static int rdg_websocket_handle_payload(BIO* bio, BYTE* pBuffer, size_t size,
 
 			return status;
 		}
-		break;
 		case WebsocketPingOpcode:
 		{
 			if (encodingContext->responseStreamBuffer == NULL)
@@ -666,7 +680,7 @@ static int rdg_websocket_read(BIO* bio, BYTE* pBuffer, size_t size,
 {
 	int status;
 	int effectiveDataLen = 0;
-	assert(encodingContext != NULL);
+	WINPR_ASSERT(encodingContext != NULL);
 	while (TRUE)
 	{
 		switch (encodingContext->state)
@@ -734,7 +748,6 @@ static int rdg_websocket_read(BIO* bio, BYTE* pBuffer, size_t size,
 				    TAG, "Websocket Server sends data with masking key. This is against RFC 6455.");
 				return -1;
 			}
-			break;
 			case WebSocketStatePayload:
 			{
 				status = rdg_websocket_handle_payload(bio, pBuffer, size, encodingContext);
@@ -759,7 +772,7 @@ static int rdg_chuncked_read(BIO* bio, BYTE* pBuffer, size_t size,
 {
 	int status;
 	int effectiveDataLen = 0;
-	assert(encodingContext != NULL);
+	WINPR_ASSERT(encodingContext != NULL);
 	while (TRUE)
 	{
 		switch (encodingContext->state)
@@ -790,8 +803,8 @@ static int rdg_chuncked_read(BIO* bio, BYTE* pBuffer, size_t size,
 			case ChunkStateFooter:
 			{
 				char _dummy[2];
-				assert(encodingContext->nextOffset == 0);
-				assert(encodingContext->headerFooterPos < 2);
+				WINPR_ASSERT(encodingContext->nextOffset == 0);
+				WINPR_ASSERT(encodingContext->headerFooterPos < 2);
 				status = BIO_read(bio, _dummy, 2 - encodingContext->headerFooterPos);
 				if (status >= 0)
 				{
@@ -811,7 +824,7 @@ static int rdg_chuncked_read(BIO* bio, BYTE* pBuffer, size_t size,
 				BOOL _haveNewLine = FALSE;
 				size_t tmp;
 				char* dst = &encodingContext->lenBuffer[encodingContext->headerFooterPos];
-				assert(encodingContext->nextOffset == 0);
+				WINPR_ASSERT(encodingContext->nextOffset == 0);
 				while (encodingContext->headerFooterPos < 10 && !_haveNewLine)
 				{
 					status = BIO_read(bio, dst, 1);
@@ -858,7 +871,7 @@ static int rdg_chuncked_read(BIO* bio, BYTE* pBuffer, size_t size,
 static int rdg_socket_read(BIO* bio, BYTE* pBuffer, size_t size,
                            rdg_http_encoding_context* encodingContext)
 {
-	assert(encodingContext != NULL);
+	WINPR_ASSERT(encodingContext != NULL);
 
 	if (encodingContext->isWebsocketTransport)
 	{
@@ -874,7 +887,6 @@ static int rdg_socket_read(BIO* bio, BYTE* pBuffer, size_t size,
 		default:
 			return -1;
 	}
-	return -1; /* should not be reached */
 }
 
 static BOOL rdg_read_all(rdpTls* tls, BYTE* buffer, size_t size,
@@ -907,7 +919,7 @@ static wStream* rdg_receive_packet(rdpRdg* rdg)
 	wStream* s;
 	const size_t header = sizeof(RdgPacketHeader);
 	size_t packetLength;
-	assert(header <= INT_MAX);
+	WINPR_ASSERT(header <= INT_MAX);
 	s = Stream_New(NULL, 1024);
 
 	if (!s)
@@ -1178,7 +1190,7 @@ static BOOL rdg_handle_ntlm_challenge(rdpNtlm* ntlm, HttpResponse* response)
 	BOOL continueNeeded = FALSE;
 	size_t len;
 	const char* token64 = NULL;
-	int ntlmTokenLength = 0;
+	size_t ntlmTokenLength = 0;
 	BYTE* ntlmTokenData = NULL;
 	long StatusCode;
 
@@ -1200,16 +1212,7 @@ static BOOL rdg_handle_ntlm_challenge(rdpNtlm* ntlm, HttpResponse* response)
 
 	len = strlen(token64);
 
-	if (len > INT_MAX)
-		return FALSE;
-
-	crypto_base64_decode(token64, (int)len, &ntlmTokenData, &ntlmTokenLength);
-
-	if (ntlmTokenLength < 0)
-	{
-		free(ntlmTokenData);
-		return FALSE;
-	}
+	crypto_base64_decode(token64, len, &ntlmTokenData, &ntlmTokenLength);
 
 	if (ntlmTokenData && ntlmTokenLength)
 	{
@@ -1232,7 +1235,7 @@ static BOOL rdg_skip_seed_payload(rdpTls* tls, SSIZE_T lastResponseLength,
 	BYTE seed_payload[10];
 	const size_t size = sizeof(seed_payload);
 
-	assert(size < SSIZE_MAX);
+	WINPR_ASSERT(size < SSIZE_MAX);
 
 	/* Per [MS-TSGU] 3.3.5.1 step 4, after final OK response RDG server sends
 	 * random "seed" payload of limited size. In practice it's 10 bytes.
@@ -1296,7 +1299,7 @@ static BOOL rdg_process_tunnel_response_optional(rdpRdg* rdg, wStream* s, UINT16
 		/* Seek over tunnelId (4 bytes) */
 		if (!Stream_SafeSeek(s, 4))
 		{
-			WLog_ERR(TAG, "[%s] Short packet %" PRIuz ", expected 4", __FUNCTION__,
+			WLog_ERR(TAG, "[%s] Short tunnelId, got %" PRIuz ", expected 4", __FUNCTION__,
 			         Stream_GetRemainingLength(s));
 			return FALSE;
 		}
@@ -1307,7 +1310,7 @@ static BOOL rdg_process_tunnel_response_optional(rdpRdg* rdg, wStream* s, UINT16
 		UINT32 caps;
 		if (Stream_GetRemainingLength(s) < 4)
 		{
-			WLog_ERR(TAG, "[%s] Short packet %" PRIuz ", expected 4", __FUNCTION__,
+			WLog_ERR(TAG, "[%s] Short capsFlags, got %" PRIuz ", expected 4", __FUNCTION__,
 			         Stream_GetRemainingLength(s));
 			return FALSE;
 		}
@@ -1321,7 +1324,7 @@ static BOOL rdg_process_tunnel_response_optional(rdpRdg* rdg, wStream* s, UINT16
 		/* Seek over nonce (20 bytes) */
 		if (!Stream_SafeSeek(s, 20))
 		{
-			WLog_ERR(TAG, "[%s] Short packet %" PRIuz ", expected 20", __FUNCTION__,
+			WLog_ERR(TAG, "[%s] Short nonce, got %" PRIuz ", expected 20", __FUNCTION__,
 			         Stream_GetRemainingLength(s));
 			return FALSE;
 		}
@@ -1329,7 +1332,7 @@ static BOOL rdg_process_tunnel_response_optional(rdpRdg* rdg, wStream* s, UINT16
 		/* Read serverCert */
 		if (!rdg_read_http_unicode_string(s, NULL, NULL))
 		{
-			WLog_ERR(TAG, "[%s] Failed to read string", __FUNCTION__);
+			WLog_ERR(TAG, "[%s] Failed to read server certificate", __FUNCTION__);
 			return FALSE;
 		}
 	}
@@ -1340,13 +1343,13 @@ static BOOL rdg_process_tunnel_response_optional(rdpRdg* rdg, wStream* s, UINT16
 		UINT16 msgLenBytes;
 		rdpContext* context = rdg->context;
 
-		assert(context);
-		assert(context->instance);
+		WINPR_ASSERT(context);
+		WINPR_ASSERT(context->instance);
 
 		/* Read message string and invoke callback */
 		if (!rdg_read_http_unicode_string(s, &msg, &msgLenBytes))
 		{
-			WLog_ERR(TAG, "[%s] Failed to read string", __FUNCTION__);
+			WLog_ERR(TAG, "[%s] Failed to read consent message", __FUNCTION__);
 			return FALSE;
 		}
 
@@ -1525,7 +1528,7 @@ static BOOL rdg_process_packet(rdpRdg* rdg, wStream* s)
 DWORD rdg_get_event_handles(rdpRdg* rdg, HANDLE* events, DWORD count)
 {
 	DWORD nCount = 0;
-	assert(rdg != NULL);
+	WINPR_ASSERT(rdg != NULL);
 
 	if (rdg->tlsOut && rdg->tlsOut->bio)
 	{
@@ -1554,63 +1557,22 @@ DWORD rdg_get_event_handles(rdpRdg* rdg, HANDLE* events, DWORD count)
 
 static BOOL rdg_get_gateway_credentials(rdpContext* context)
 {
-	rdpSettings* settings = context->settings;
 	freerdp* instance = context->instance;
 
-	if (!settings->GatewayPassword || !settings->GatewayUsername ||
-	    !strlen(settings->GatewayPassword) || !strlen(settings->GatewayUsername))
+	auth_status rc = utils_authenticate_gateway(instance, GW_AUTH_RDG);
+	switch (rc)
 	{
-		if (freerdp_shall_disconnect(instance))
+		case AUTH_SUCCESS:
+		case AUTH_SKIP:
+			return TRUE;
+		case AUTH_NO_CREDENTIALS:
+			freerdp_set_last_error_log(instance->context,
+			                           FREERDP_ERROR_CONNECT_NO_OR_MISSING_CREDENTIALS);
 			return FALSE;
-
-		if (!instance->GatewayAuthenticate)
-		{
-			freerdp_set_last_error_log(context, FREERDP_ERROR_CONNECT_NO_OR_MISSING_CREDENTIALS);
+		case AUTH_FAILED:
+		default:
 			return FALSE;
-		}
-		else
-		{
-			BOOL proceed =
-			    instance->GatewayAuthenticate(instance, &settings->GatewayUsername,
-			                                  &settings->GatewayPassword, &settings->GatewayDomain);
-
-			if (!proceed)
-			{
-				freerdp_set_last_error_log(context,
-				                           FREERDP_ERROR_CONNECT_NO_OR_MISSING_CREDENTIALS);
-				return FALSE;
-			}
-
-			if (settings->GatewayUseSameCredentials)
-			{
-				if (settings->GatewayUsername)
-				{
-					free(settings->Username);
-
-					if (!(settings->Username = _strdup(settings->GatewayUsername)))
-						return FALSE;
-				}
-
-				if (settings->GatewayDomain)
-				{
-					free(settings->Domain);
-
-					if (!(settings->Domain = _strdup(settings->GatewayDomain)))
-						return FALSE;
-				}
-
-				if (settings->GatewayPassword)
-				{
-					free(settings->Password);
-
-					if (!(settings->Password = _strdup(settings->GatewayPassword)))
-						return FALSE;
-				}
-			}
-		}
 	}
-
-	return TRUE;
 }
 
 static BOOL rdg_ntlm_init(rdpRdg* rdg, rdpTls* tls)
@@ -1630,7 +1592,7 @@ static BOOL rdg_ntlm_init(rdpRdg* rdg, rdpTls* tls)
 	                      settings->GatewayPassword, tls->Bindings))
 		return FALSE;
 
-	if (!ntlm_client_make_spn(rdg->ntlm, _T("HTTP"), settings->GatewayHostname))
+	if (!ntlm_client_make_spn(rdg->ntlm, "HTTP", settings->GatewayHostname))
 		return FALSE;
 
 	if (!ntlm_authenticate(rdg->ntlm, &continueNeeded))
@@ -1675,8 +1637,8 @@ static BOOL rdg_tls_connect(rdpRdg* rdg, rdpTls* tls, const char* peerAddress, i
 	if (settings->GatewayPort > UINT16_MAX)
 		return FALSE;
 
-	sockfd = freerdp_tcp_connect(rdg->context, settings, peerAddress ? peerAddress : peerHostname,
-	                             peerPort, timeout);
+	sockfd = freerdp_tcp_connect(rdg->context, peerAddress ? peerAddress : peerHostname, peerPort,
+	                             timeout);
 
 	if (sockfd < 0)
 	{
@@ -1844,7 +1806,6 @@ static BOOL rdg_establish_data_connection(rdpRdg* rdg, rdpTls* tls, const char* 
 			rdg->transferEncoding.context.websocket.responseStreamBuffer = NULL;
 
 			return TRUE;
-			break;
 		default:
 			return FALSE;
 	}
@@ -1891,7 +1852,10 @@ static BOOL rdg_tunnel_connect(rdpRdg* rdg)
 
 		if (!status)
 		{
-			rdg->context->rdp->transport->layer = TRANSPORT_LAYER_CLOSED;
+			WINPR_ASSERT(rdg);
+			WINPR_ASSERT(rdg->context);
+			WINPR_ASSERT(rdg->context->rdp);
+			transport_set_layer(rdg->context->rdp->transport, TRANSPORT_LAYER_CLOSED);
 			return FALSE;
 		}
 	}
@@ -1904,7 +1868,7 @@ BOOL rdg_connect(rdpRdg* rdg, DWORD timeout, BOOL* rpcFallback)
 	BOOL status;
 	SOCKET outConnSocket = 0;
 	char* peerAddress = NULL;
-	assert(rdg != NULL);
+	WINPR_ASSERT(rdg != NULL);
 	status =
 	    rdg_establish_data_connection(rdg, rdg->tlsOut, "RDG_OUT_DATA", NULL, timeout, rpcFallback);
 
@@ -1929,7 +1893,10 @@ BOOL rdg_connect(rdpRdg* rdg, DWORD timeout, BOOL* rpcFallback)
 
 	if (!status)
 	{
-		rdg->context->rdp->transport->layer = TRANSPORT_LAYER_CLOSED;
+		WINPR_ASSERT(rdg);
+		WINPR_ASSERT(rdg->context);
+		WINPR_ASSERT(rdg->context->rdp);
+		transport_set_layer(rdg->context->rdp->transport, TRANSPORT_LAYER_CLOSED);
 		return FALSE;
 	}
 
@@ -2005,7 +1972,7 @@ static int rdg_write_websocket_data_packet(rdpRdg* rdg, const BYTE* buf, int isi
 	/* mask as much as possible with 32bit access */
 	for (streamPos = 0; streamPos + 4 <= isize; streamPos += 4)
 	{
-		uint32_t masked = *((uint32_t*)((BYTE*)buf + streamPos)) ^ maskingKey;
+		uint32_t masked = *((const uint32_t*)((const BYTE*)buf + streamPos)) ^ maskingKey;
 		Stream_Write_UINT32(sWS, masked);
 	}
 
@@ -2013,7 +1980,7 @@ static int rdg_write_websocket_data_packet(rdpRdg* rdg, const BYTE* buf, int isi
 	for (; streamPos < isize; streamPos++)
 	{
 		BYTE* partialMask = (BYTE*)(&maskingKey) + streamPos % 4;
-		BYTE masked = *((BYTE*)((BYTE*)buf + streamPos)) ^ *partialMask;
+		BYTE masked = *((const BYTE*)((const BYTE*)buf + streamPos)) ^ *partialMask;
 		Stream_Write_UINT8(sWS, masked);
 	}
 
@@ -2060,7 +2027,10 @@ static int rdg_write_chunked_data_packet(rdpRdg* rdg, const BYTE* buf, int isize
 	len = Stream_Length(sChunk);
 
 	if (len > INT_MAX)
+	{
+		Stream_Free(sChunk, TRUE);
 		return -1;
+	}
 
 	status = tls_write_all(rdg->tlsIn, Stream_Buffer(sChunk), (int)len);
 	Stream_Free(sChunk, TRUE);
@@ -2081,8 +2051,6 @@ static int rdg_write_data_packet(rdpRdg* rdg, const BYTE* buf, int isize)
 	}
 	else
 		return rdg_write_chunked_data_packet(rdg, buf, isize);
-
-	return -1;
 }
 
 static BOOL rdg_process_close_packet(rdpRdg* rdg, wStream* s)
@@ -2141,8 +2109,8 @@ static BOOL rdg_process_service_message(rdpRdg* rdg, wStream* s)
 	const WCHAR* msg;
 	UINT16 msgLenBytes;
 	rdpContext* context = rdg->context;
-	assert(context);
-	assert(context->instance);
+	WINPR_ASSERT(context);
+	WINPR_ASSERT(context->instance);
 
 	/* Read message string */
 	if (!rdg_read_http_unicode_string(s, &msg, &msgLenBytes))
@@ -2173,7 +2141,7 @@ static BOOL rdg_process_control_packet(rdpRdg* rdg, int type, size_t packetLengt
 	if (packetLength < sizeof(RdgPacketHeader))
 		return FALSE;
 
-	assert(sizeof(RdgPacketHeader) < INT_MAX);
+	WINPR_ASSERT(sizeof(RdgPacketHeader) < INT_MAX);
 
 	if (payloadSize)
 	{
@@ -2253,7 +2221,7 @@ static int rdg_read_data_packet(rdpRdg* rdg, BYTE* buffer, int size)
 
 	if (!rdg->packetRemainingCount)
 	{
-		assert(sizeof(RdgPacketHeader) < INT_MAX);
+		WINPR_ASSERT(sizeof(RdgPacketHeader) < INT_MAX);
 
 		while (readCount < sizeof(RdgPacketHeader))
 		{
@@ -2394,10 +2362,10 @@ static int rdg_bio_gets(BIO* bio, char* str, int size)
 	return -2;
 }
 
-static long rdg_bio_ctrl(BIO* bio, int cmd, long arg1, void* arg2)
+static long rdg_bio_ctrl(BIO* in_bio, int cmd, long arg1, void* arg2)
 {
 	long status = -1;
-	rdpRdg* rdg = (rdpRdg*)BIO_get_data(bio);
+	rdpRdg* rdg = (rdpRdg*)BIO_get_data(in_bio);
 	rdpTls* tlsOut = rdg->tlsOut;
 	rdpTls* tlsIn = rdg->tlsIn;
 
@@ -2414,42 +2382,42 @@ static long rdg_bio_ctrl(BIO* bio, int cmd, long arg1, void* arg2)
 	}
 	else if (cmd == BIO_C_READ_BLOCKED)
 	{
-		BIO* bio = tlsOut->bio;
-		status = BIO_read_blocked(bio);
+		BIO* cbio = tlsOut->bio;
+		status = BIO_read_blocked(cbio);
 	}
 	else if (cmd == BIO_C_WRITE_BLOCKED)
 	{
-		BIO* bio = tlsIn->bio;
+		BIO* cbio = tlsIn->bio;
 
 		if (rdg->transferEncoding.isWebsocketTransport)
-			bio = tlsOut->bio;
+			cbio = tlsOut->bio;
 
-		status = BIO_write_blocked(bio);
+		status = BIO_write_blocked(cbio);
 	}
 	else if (cmd == BIO_C_WAIT_READ)
 	{
 		int timeout = (int)arg1;
-		BIO* bio = tlsOut->bio;
+		BIO* cbio = tlsOut->bio;
 
-		if (BIO_read_blocked(bio))
-			return BIO_wait_read(bio, timeout);
-		else if (BIO_write_blocked(bio))
-			return BIO_wait_write(bio, timeout);
+		if (BIO_read_blocked(cbio))
+			return BIO_wait_read(cbio, timeout);
+		else if (BIO_write_blocked(cbio))
+			return BIO_wait_write(cbio, timeout);
 		else
 			status = 1;
 	}
 	else if (cmd == BIO_C_WAIT_WRITE)
 	{
 		int timeout = (int)arg1;
-		BIO* bio = tlsIn->bio;
+		BIO* cbio = tlsIn->bio;
 
 		if (rdg->transferEncoding.isWebsocketTransport)
-			bio = tlsOut->bio;
+			cbio = tlsOut->bio;
 
-		if (BIO_write_blocked(bio))
-			status = BIO_wait_write(bio, timeout);
-		else if (BIO_read_blocked(bio))
-			status = BIO_wait_read(bio, timeout);
+		if (BIO_write_blocked(cbio))
+			status = BIO_wait_write(cbio, timeout);
+		else if (BIO_read_blocked(cbio))
+			status = BIO_wait_read(cbio, timeout);
 		else
 			status = 1;
 	}

@@ -33,7 +33,7 @@
 #define WINPR_ALIGNED_MEM_SIGNATURE 0x0BA0BAB
 
 #define WINPR_ALIGNED_MEM_STRUCT_FROM_PTR(_memptr) \
-	(WINPR_ALIGNED_MEM*)(((size_t)(((BYTE*)_memptr) - sizeof(WINPR_ALIGNED_MEM))));
+	(WINPR_ALIGNED_MEM*)(((size_t)(((BYTE*)_memptr) - sizeof(WINPR_ALIGNED_MEM))))
 
 #include <stdlib.h>
 
@@ -206,9 +206,9 @@ void* _aligned_offset_recalloc(void* memblock, size_t num, size_t size, size_t a
 
 	pNewMem = WINPR_ALIGNED_MEM_STRUCT_FROM_PTR(newMemblock);
 	{
-		const size_t size = cMIN(pMem->size, pNewMem->size);
-		memcpy(newMemblock, pMem->base_addr, size);
-		ZeroMemory(newMemblock + size, pNewMem->size - size);
+		const size_t csize = cMIN(pMem->size, pNewMem->size);
+		memcpy(newMemblock, pMem->base_addr, csize);
+		ZeroMemory(newMemblock + csize, pNewMem->size - csize);
 	}
 fail:
 	_aligned_free(memblock);

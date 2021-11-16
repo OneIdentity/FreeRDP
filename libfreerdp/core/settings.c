@@ -44,7 +44,7 @@
 
 #define TAG FREERDP_TAG("settings")
 
-#ifdef _WIN32
+#ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable : 4244)
 #endif
@@ -78,7 +78,7 @@ static BOOL settings_reg_query_word_val(HKEY hKey, const TCHAR* sub, UINT16* val
 	if (!settings_reg_query_dword_val(hKey, sub, &dwValue))
 		return FALSE;
 
-	*value = dwValue;
+	*value = (UINT16)dwValue;
 	return TRUE;
 }
 
@@ -311,7 +311,10 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 	if (!settings)
 		return NULL;
 
-	if (!freerdp_settings_set_bool(settings, FreeRDP_HiDefRemoteApp, FALSE) ||
+	if (!freerdp_settings_set_bool(settings, FreeRDP_UnicodeInput, TRUE) ||
+	    !freerdp_settings_set_bool(settings, FreeRDP_HasHorizontalWheel, TRUE) ||
+	    !freerdp_settings_set_bool(settings, FreeRDP_HasExtendedMouseEvent, TRUE) ||
+	    !freerdp_settings_set_bool(settings, FreeRDP_HiDefRemoteApp, FALSE) ||
 	    !freerdp_settings_set_uint32(
 	        settings, FreeRDP_RemoteApplicationSupportMask,
 	        RAIL_LEVEL_SUPPORTED | RAIL_LEVEL_DOCKED_LANGBAR_SUPPORTED |
@@ -381,7 +384,9 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 	    !freerdp_settings_set_bool(settings, FreeRDP_DisableCredentialsDelegation, FALSE) ||
 	    !freerdp_settings_set_uint32(settings, FreeRDP_AuthenticationLevel, 2) ||
 	    !freerdp_settings_set_uint32(settings, FreeRDP_ChannelCount, 0) ||
-	    !freerdp_settings_set_uint32(settings, FreeRDP_ChannelDefArraySize, 32))
+	    !freerdp_settings_set_uint32(settings, FreeRDP_ChannelDefArraySize, 32) ||
+	    !freerdp_settings_set_bool(settings, FreeRDP_CertificateUseKnownHosts, TRUE) ||
+	    !freerdp_settings_set_bool(settings, FreeRDP_CertificateCallbackPreferPEM, FALSE))
 		goto out_fail;
 
 	settings->ChannelDefArray = (CHANNEL_DEF*)calloc(
@@ -556,6 +561,7 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 	    !freerdp_settings_set_bool(settings, FreeRDP_GfxSmallCache, FALSE) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_GfxProgressive, FALSE) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_GfxProgressiveV2, FALSE) ||
+	    !freerdp_settings_set_bool(settings, FreeRDP_GfxPlanar, TRUE) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_GfxH264, FALSE) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_GfxAVC444, FALSE) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_GfxSendQoeAck, FALSE))
@@ -578,33 +584,12 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 	if (!settings->ClientTimeZone)
 		goto out_fail;
 
-	freerdp_settings_set_uint32(settings, FreeRDP_DeviceArraySize, 16);
-	settings->DeviceArray = (RDPDR_DEVICE**)calloc(
-	    freerdp_settings_get_uint32(settings, FreeRDP_DeviceArraySize), sizeof(RDPDR_DEVICE*));
-
-	if (!settings->DeviceArray)
-		goto out_fail;
-
-	freerdp_settings_set_uint32(settings, FreeRDP_StaticChannelArraySize, 16);
-	settings->StaticChannelArray = (ADDIN_ARGV**)calloc(
-	    freerdp_settings_get_uint32(settings, FreeRDP_StaticChannelArraySize), sizeof(ADDIN_ARGV*));
-
-	if (!settings->StaticChannelArray)
-		goto out_fail;
-
-	freerdp_settings_set_uint32(settings, FreeRDP_DynamicChannelArraySize, 16);
-	settings->DynamicChannelArray =
-	    (ADDIN_ARGV**)calloc(freerdp_settings_get_uint32(settings, FreeRDP_DynamicChannelArraySize),
-	                         sizeof(ADDIN_ARGV*));
-
-	if (!settings->DynamicChannelArray)
-		goto out_fail;
-
 	if (!freerdp_settings_set_bool(settings, FreeRDP_TcpKeepAlive, TRUE) ||
 	    !freerdp_settings_set_uint32(settings, FreeRDP_TcpKeepAliveRetries, 3) ||
 	    !freerdp_settings_set_uint32(settings, FreeRDP_TcpKeepAliveDelay, 5) ||
 	    !freerdp_settings_set_uint32(settings, FreeRDP_TcpKeepAliveInterval, 2) ||
-	    !freerdp_settings_set_uint32(settings, FreeRDP_TcpAckTimeout, 9000))
+	    !freerdp_settings_set_uint32(settings, FreeRDP_TcpAckTimeout, 9000) ||
+	    !freerdp_settings_set_uint32(settings, FreeRDP_TcpConnectTimeout, 15000))
 		goto out_fail;
 
 	if (!freerdp_settings_get_bool(settings, FreeRDP_ServerMode))
@@ -626,35 +611,35 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 		 * Custom builds use <Vendor>/<Product> as config folder. */
 		if (_stricmp(FREERDP_VENDOR_STRING, FREERDP_PRODUCT_STRING))
 		{
-			BOOL rc = TRUE;
+			BOOL res = TRUE;
 			base = GetKnownSubPath(KNOWN_PATH_XDG_CONFIG_HOME, FREERDP_VENDOR_STRING);
 
 			if (base)
 			{
 				char* combined = GetCombinedPath(base, FREERDP_PRODUCT_STRING);
-				rc = freerdp_settings_set_string(settings, FreeRDP_ConfigPath, combined);
+				res = freerdp_settings_set_string(settings, FreeRDP_ConfigPath, combined);
 				free(combined);
 			}
 
 			free(base);
-			if (!rc)
+			if (!res)
 				goto out_fail;
 		}
 		else
 		{
-			BOOL rc;
+			BOOL res;
 			size_t i;
-			char* path;
+			char* cpath;
 			char product[sizeof(FREERDP_PRODUCT_STRING)];
 			memset(product, 0, sizeof(product));
 
 			for (i = 0; i < sizeof(product); i++)
 				product[i] = tolower(FREERDP_PRODUCT_STRING[i]);
 
-			path = GetKnownSubPath(KNOWN_PATH_XDG_CONFIG_HOME, product);
-			rc = freerdp_settings_set_string(settings, FreeRDP_ConfigPath, path);
-			free(path);
-			if (!rc)
+			cpath = GetKnownSubPath(KNOWN_PATH_XDG_CONFIG_HOME, product);
+			res = freerdp_settings_set_string(settings, FreeRDP_ConfigPath, cpath);
+			free(cpath);
+			if (!res)
 				goto out_fail;
 		}
 
@@ -997,7 +982,7 @@ static BOOL freerdp_settings_int_buffer_copy(rdpSettings* _settings, const rdpSe
 	     index++)
 	{
 		_settings->StaticChannelArray[index] =
-		    freerdp_static_channel_clone(settings->StaticChannelArray[index]);
+		    freerdp_addin_argv_clone(settings->StaticChannelArray[index]);
 
 		if (!_settings->StaticChannelArray[index])
 			goto out_fail;
@@ -1035,7 +1020,7 @@ static BOOL freerdp_settings_int_buffer_copy(rdpSettings* _settings, const rdpSe
 	     index++)
 	{
 		_settings->DynamicChannelArray[index] =
-		    freerdp_dynamic_channel_clone(settings->DynamicChannelArray[index]);
+		    freerdp_addin_argv_clone(settings->DynamicChannelArray[index]);
 
 		if (!_settings->DynamicChannelArray[index])
 			goto out_fail;
@@ -1067,6 +1052,7 @@ BOOL freerdp_settings_copy(rdpSettings* _settings, const rdpSettings* settings)
 	_settings->LoadBalanceInfo = NULL;
 	_settings->ServerRandom = NULL;
 	_settings->ClientRandom = NULL;
+	_settings->ServerCertificate = NULL;
 	_settings->RdpServerCertificate = NULL;
 	_settings->RdpServerRsaKey = NULL;
 	_settings->ChannelDefArray = NULL;
@@ -1112,6 +1098,6 @@ out_fail:
 	freerdp_settings_free(_settings);
 	return NULL;
 }
-#ifdef _WIN32
+#ifdef _MSC_VER
 #pragma warning(pop)
 #endif

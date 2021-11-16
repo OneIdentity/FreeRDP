@@ -477,6 +477,7 @@ static UINT smartcard_process_irp(SMARTCARD_DEVICE* smartcard, IRP* irp)
 		{
 			if ((status = smartcard_irp_device_control_call(smartcard, operation)))
 			{
+				free(operation);
 				WLog_ERR(TAG, "smartcard_irp_device_control_call failed with error %" PRId32 "!",
 				         status);
 				return (UINT32)status;
@@ -710,6 +711,7 @@ static UINT smartcard_irp_request(DEVICE* device, IRP* irp)
  *
  * @return 0 on success, otherwise a Win32 error code
  */
+extern UINT DeviceServiceEntry(PDEVICE_SERVICE_ENTRY_POINTS pEntryPoints);
 UINT DeviceServiceEntry(PDEVICE_SERVICE_ENTRY_POINTS pEntryPoints)
 {
 	SMARTCARD_DEVICE* smartcard = NULL;

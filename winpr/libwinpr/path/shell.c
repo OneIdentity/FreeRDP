@@ -221,7 +221,7 @@ static char* GetPath_XDG_CACHE_HOME(void)
 	{
 		path = GetCombinedPath(home, "cache");
 
-		if (!PathFileExistsA(path))
+		if (!winpr_PathFileExists(path))
 			if (!CreateDirectoryA(path, NULL))
 				path = NULL;
 	}
@@ -412,35 +412,30 @@ char* GetEnvironmentSubPath(char* name, const char* path)
 
 char* GetCombinedPath(const char* basePath, const char* subPath)
 {
-	int length;
+	size_t length;
 	HRESULT status;
 	char* path = NULL;
-	char* subPathCpy;
-	int basePathLength = 0;
-	int subPathLength = 0;
+	char* subPathCpy = NULL;
+	size_t basePathLength = 0;
+	size_t subPathLength = 0;
 
 	if (basePath)
-		basePathLength = (int)strlen(basePath);
+		basePathLength = strlen(basePath);
 
 	if (subPath)
-		subPathLength = (int)strlen(subPath);
+		subPathLength = strlen(subPath);
 
 	length = basePathLength + subPathLength + 1;
-	path = (char*)malloc(length + 1);
+	path = (char*)calloc(1, length + 1);
 
 	if (!path)
-		return NULL;
+		goto fail;
 
 	if (basePath)
 		CopyMemory(path, basePath, basePathLength);
 
-	path[basePathLength] = '\0';
-
 	if (FAILED(PathCchConvertStyleA(path, basePathLength, PATH_STYLE_NATIVE)))
-	{
-		free(path);
-		return NULL;
-	}
+		goto fail;
 
 	if (!subPath)
 		return path;
@@ -448,28 +443,22 @@ char* GetCombinedPath(const char* basePath, const char* subPath)
 	subPathCpy = _strdup(subPath);
 
 	if (!subPathCpy)
-	{
-		free(path);
-		return NULL;
-	}
+		goto fail;
 
 	if (FAILED(PathCchConvertStyleA(subPathCpy, subPathLength, PATH_STYLE_NATIVE)))
-	{
-		free(path);
-		free(subPathCpy);
-		return NULL;
-	}
+		goto fail;
 
 	status = NativePathCchAppendA(path, length + 1, subPathCpy);
-	free(subPathCpy);
-
 	if (FAILED(status))
-	{
-		free(path);
-		return NULL;
-	}
-	else
-		return path;
+		goto fail;
+
+	free(subPathCpy);
+	return path;
+
+fail:
+	free(path);
+	free(subPathCpy);
+	return NULL;
 }
 
 BOOL PathMakePathA(LPCSTR path, LPSECURITY_ATTRIBUTES lpAttributes)
@@ -550,7 +539,7 @@ BOOL PathMakePathW(LPCWSTR path, LPSECURITY_ATTRIBUTES lpAttributes)
 
 #endif
 
-	if (ConvertFromUnicode(CP_UTF8, 0, path, -1, &dup, 0, NULL, NULL))
+	if (ConvertFromUnicode(CP_UTF8, 0, path, -1, &dup, 0, NULL, NULL) <= 0)
 		return FALSE;
 
 #ifdef __OS2__
@@ -621,7 +610,7 @@ BOOL PathFileExistsW(LPCWSTR pszPath)
 	if (ConvertFromUnicode(CP_UTF8, 0, pszPath, -1, &lpFileNameA, 0, NULL, NULL) < 1)
 		return FALSE;
 
-	ret = PathFileExistsA(lpFileNameA);
+	ret = winpr_PathFileExists(lpFileNameA);
 	free(lpFileNameA);
 	return ret;
 }
@@ -663,8 +652,115 @@ BOOL PathIsDirectoryEmptyW(LPCWSTR pszPath)
 
 #else
 
-#ifdef _WIN32
+#ifdef _MSC_VER
 #pragma comment(lib, "shlwapi.lib")
 #endif
 
 #endif
+
+BOOL winpr_MoveFile(LPCSTR lpExistingFileName, LPCSTR lpNewFileName)
+{
+#ifndef _WIN32
+	return MoveFileA(lpExistingFileName, lpNewFileName);
+#else
+	BOOL result = FALSE;
+	LPWSTR lpExistingFileNameW = NULL;
+	LPWSTR lpNewFileNameW = NULL;
+
+	if (!lpExistingFileName || !lpNewFileName)
+		return FALSE;
+
+	if (ConvertToUnicode(CP_UTF8, 0, lpExistingFileName, -1, &lpExistingFileNameW, 0) < 1)
+		goto cleanup;
+
+	if (ConvertToUnicode(CP_UTF8, 0, lpNewFileName, -1, &lpNewFileNameW, 0) < 1)
+		goto cleanup;
+
+	result = MoveFileW(lpExistingFileNameW, lpNewFileNameW);
+
+cleanup:
+	free(lpExistingFileNameW);
+	free(lpNewFileNameW);
+	return result;
+#endif
+}
+
+BOOL winpr_DeleteFile(const char* lpFileName)
+{
+#ifndef _WIN32
+	return DeleteFileA(lpFileName);
+#else
+	LPWSTR lpFileNameW = NULL;
+	BOOL result = FALSE;
+
+	if (lpFileName)
+	{
+		if (ConvertToUnicode(CP_UTF8, 0, lpFileName, -1, &lpFileNameW, 0) < 1)
+			goto cleanup;
+	}
+
+	result = DeleteFileW(lpFileNameW);
+
+cleanup:
+	free(lpFileNameW);
+	return result;
+#endif
+}
+
+BOOL winpr_RemoveDirectory(LPCSTR lpPathName)
+{
+#ifndef _WIN32
+	return RemoveDirectoryA(lpPathName);
+#else
+	LPWSTR lpPathNameW = NULL;
+	BOOL result = FALSE;
+
+	if (lpPathName)
+	{
+		if (ConvertToUnicode(CP_UTF8, 0, lpPathName, -1, &lpPathNameW, 0) < 1)
+			goto cleanup;
+	}
+
+	result = RemoveDirectoryW(lpPathNameW);
+
+cleanup:
+	free(lpPathNameW);
+	return result;
+#endif
+}
+
+BOOL winpr_PathFileExists(const char* pszPath)
+{
+#ifndef _WIN32
+	return PathFileExistsA(pszPath);
+#else
+	WCHAR* pszPathW = NULL;
+	BOOL result = FALSE;
+
+	if (ConvertToUnicode(CP_UTF8, 0, pszPath, -1, &pszPathW, 0) < 1)
+		return FALSE;
+
+	result = PathFileExistsW(pszPathW);
+	free(pszPathW);
+
+	return result;
+#endif
+}
+
+BOOL winpr_PathMakePath(const char* path, LPSECURITY_ATTRIBUTES lpAttributes)
+{
+#ifndef _WIN32
+	return PathMakePathA(path, lpAttributes);
+#else
+	WCHAR* pathW = NULL;
+	BOOL result = FALSE;
+
+	if (ConvertToUnicode(CP_UTF8, 0, path, -1, &pathW, 0) < 1)
+		return FALSE;
+
+	result = SHCreateDirectoryExW(NULL, pathW, lpAttributes) == ERROR_SUCCESS;
+	free(pathW);
+
+	return result;
+#endif
+}

@@ -185,7 +185,7 @@
  */
 
 static int rdp_client_connect_finalize(rdpRdp* rdp);
-static BOOL rdp_send_server_control_granted_pdu(rdpRdp* rdp);
+static BOOL rdp_set_state(rdpRdp* rdp, CONNECTION_STATE state);
 
 static BOOL rdp_client_reset_codecs(rdpContext* context)
 {
@@ -195,14 +195,19 @@ static BOOL rdp_client_reset_codecs(rdpContext* context)
 		return FALSE;
 
 	settings = context->settings;
-	context->codecs = codecs_new(context);
 
-	if (!context->codecs)
-		return FALSE;
+	if (!freerdp_settings_get_bool(settings, FreeRDP_DeactivateClientDecoding))
+	{
+		codecs_free(context->codecs);
+		context->codecs = codecs_new(context);
 
-	if (!freerdp_client_codecs_prepare(context->codecs, FREERDP_CODEC_ALL, settings->DesktopWidth,
-	                                   settings->DesktopHeight))
-		return FALSE;
+		if (!context->codecs)
+			return FALSE;
+
+		if (!freerdp_client_codecs_prepare(context->codecs,
+		                                   freerdp_settings_get_codecs_flags(settings),
+		                                   settings->DesktopWidth, settings->DesktopHeight))
+			return FALSE;
 
 /* Runtime H264 detection. (only available if dynamic backend loading is defined)
  * If no backend is available disable it before the channel is loaded.
@@ -215,6 +220,8 @@ static BOOL rdp_client_reset_codecs(rdpContext* context)
 		settings->GfxAVC444v2 = FALSE;
 	}
 #endif
+	}
+
 	return TRUE;
 }
 
@@ -229,11 +236,16 @@ BOOL rdp_client_connect(rdpRdp* rdp)
 {
 	UINT32 SelectedProtocol;
 	BOOL status;
-	rdpSettings* settings = rdp->settings;
+	rdpSettings* settings;
 	/* make sure SSL is initialize for earlier enough for crypto, by taking advantage of winpr SSL
 	 * FIPS flag for openssl initialization */
 	DWORD flags = WINPR_SSL_INIT_DEFAULT;
 	UINT32 timeout;
+
+	WINPR_ASSERT(rdp);
+
+	settings = rdp->settings;
+	WINPR_ASSERT(settings);
 
 	if (!rdp_client_reset_codecs(rdp->context))
 		return FALSE;
@@ -328,35 +340,38 @@ BOOL rdp_client_connect(rdpRdp* rdp)
 			return FALSE;
 	}
 
-	rdp_client_transition_to_state(rdp, CONNECTION_STATE_NEGO);
-
-	if (!nego_connect(rdp->nego))
+	if (!freerdp_settings_get_bool(settings, FreeRDP_TransportDumpReplay))
 	{
-		if (!freerdp_get_last_error(rdp->context))
+		rdp_client_transition_to_state(rdp, CONNECTION_STATE_NEGO);
+
+		if (!nego_connect(rdp->nego))
 		{
-			freerdp_set_last_error_log(rdp->context, FREERDP_ERROR_SECURITY_NEGO_CONNECT_FAILED);
-			WLog_ERR(TAG, "Error: protocol security negotiation or connection failure");
+			if (!freerdp_get_last_error(rdp->context))
+			{
+				freerdp_set_last_error_log(rdp->context,
+				                           FREERDP_ERROR_SECURITY_NEGO_CONNECT_FAILED);
+				WLog_ERR(TAG, "Error: protocol security negotiation or connection failure");
+			}
+
+			return FALSE;
 		}
 
-		return FALSE;
-	}
+		SelectedProtocol = nego_get_selected_protocol(rdp->nego);
 
-	SelectedProtocol = nego_get_selected_protocol(rdp->nego);
-
-	if ((SelectedProtocol & PROTOCOL_SSL) || (SelectedProtocol == PROTOCOL_RDP))
-	{
-		if ((settings->Username != NULL) &&
-		    ((settings->Password != NULL) ||
-		     (settings->RedirectionPassword != NULL && settings->RedirectionPasswordLength > 0)))
-			settings->AutoLogonEnabled = TRUE;
+		if ((SelectedProtocol & PROTOCOL_SSL) || (SelectedProtocol == PROTOCOL_RDP))
+		{
+			if ((settings->Username != NULL) &&
+			    ((settings->Password != NULL) || (settings->RedirectionPassword != NULL &&
+			                                      settings->RedirectionPasswordLength > 0)))
+				settings->AutoLogonEnabled = TRUE;
+		}
 	}
 
 	/* everything beyond this point is event-driven and non blocking */
-	rdp->transport->ReceiveCallback = rdp_recv_callback;
-	rdp->transport->ReceiveExtra = rdp;
+	transport_set_recv_callbacks(rdp->transport, rdp_recv_callback, rdp);
 	transport_set_blocking_mode(rdp->transport, FALSE);
 
-	if (rdp->state != CONNECTION_STATE_NLA)
+	if (rdp_get_state(rdp) != CONNECTION_STATE_NLA)
 	{
 		if (!mcs_client_begin(rdp->mcs))
 			return FALSE;
@@ -370,7 +385,7 @@ BOOL rdp_client_connect(rdpRdp* rdp)
 			return FALSE;
 		}
 
-		if (rdp->state == CONNECTION_STATE_ACTIVE)
+		if (rdp_get_state(rdp) == CONNECTION_STATE_ACTIVE)
 			return TRUE;
 
 		Sleep(100);
@@ -389,10 +404,15 @@ BOOL rdp_client_disconnect(rdpRdp* rdp)
 
 	context = rdp->context;
 
-	if (!nego_disconnect(rdp->nego))
+	if (rdp->nego)
+	{
+		if (!nego_disconnect(rdp->nego))
+			return FALSE;
+	}
+
+	if (!rdp_reset(rdp))
 		return FALSE;
 
-	rdp_reset(rdp);
 	rdp_client_transition_to_state(rdp, CONNECTION_STATE_INITIAL);
 
 	if (freerdp_channels_disconnect(context->channels, context->instance) != CHANNEL_RC_OK)
@@ -410,7 +430,11 @@ BOOL rdp_client_disconnect_and_clear(rdpRdp* rdp)
 	if (!rdp_client_disconnect(rdp))
 		return FALSE;
 
+	WINPR_ASSERT(rdp);
+
 	context = rdp->context;
+	WINPR_ASSERT(context);
+
 	context->LastError = FREERDP_ERROR_SUCCESS;
 	clearChannelError(context);
 	ResetEvent(context->abortEvent);
@@ -522,16 +546,16 @@ BOOL rdp_client_redirect(rdpRdp* rdp)
 	BOOL status;
 	rdpSettings* settings;
 
-	if (!rdp || !rdp->settings)
-		return FALSE;
-
-	settings = rdp->settings;
-
 	if (!rdp_client_disconnect_and_clear(rdp))
 		return FALSE;
 
 	if (rdp_redirection_apply_settings(rdp) != 0)
 		return FALSE;
+
+	WINPR_ASSERT(rdp);
+
+	settings = rdp->settings;
+	WINPR_ASSERT(settings);
 
 	if (settings->RedirectionFlags & LB_LOAD_BALANCE_INFO)
 	{
@@ -595,9 +619,6 @@ BOOL rdp_client_redirect(rdpRdp* rdp)
 BOOL rdp_client_reconnect(rdpRdp* rdp)
 {
 	BOOL status;
-
-	if (!rdp || !rdp->context || !rdp->context->channels)
-		return FALSE;
 
 	if (!rdp_client_disconnect_and_clear(rdp))
 		return FALSE;
@@ -909,7 +930,8 @@ BOOL rdp_client_connect_mcs_channel_join_confirm(rdpRdp* rdp, wStream* s)
 		{
 			if (mcs->channelCount > 0)
 			{
-				if (!mcs_send_channel_join_request(mcs, mcs->channels[0].ChannelId))
+				const rdpMcsChannel* cur = &mcs->channels[0];
+				if (!mcs_send_channel_join_request(mcs, cur->ChannelId))
 					return FALSE;
 
 				allJoined = FALSE;
@@ -925,7 +947,8 @@ BOOL rdp_client_connect_mcs_channel_join_confirm(rdpRdp* rdp, wStream* s)
 
 		if (mcs->channelCount > 0)
 		{
-			if (!mcs_send_channel_join_request(mcs, mcs->channels[0].ChannelId))
+			const rdpMcsChannel* cur = &mcs->channels[0];
+			if (!mcs_send_channel_join_request(mcs, cur->ChannelId))
 				return FALSE;
 
 			allJoined = FALSE;
@@ -935,19 +958,21 @@ BOOL rdp_client_connect_mcs_channel_join_confirm(rdpRdp* rdp, wStream* s)
 	{
 		for (i = 0; i < mcs->channelCount; i++)
 		{
-			if (mcs->channels[i].joined)
+			rdpMcsChannel* cur = &mcs->channels[i];
+			if (cur->joined)
 				continue;
 
-			if (mcs->channels[i].ChannelId != channelId)
+			if (cur->ChannelId != channelId)
 				return FALSE;
 
-			mcs->channels[i].joined = TRUE;
+			cur->joined = TRUE;
 			break;
 		}
 
 		if (i + 1 < mcs->channelCount)
 		{
-			if (!mcs_send_channel_join_request(mcs, mcs->channels[i + 1].ChannelId))
+			const rdpMcsChannel* cur = &mcs->channels[i + 1];
+			if (!mcs_send_channel_join_request(mcs, cur->ChannelId))
 				return FALSE;
 
 			allJoined = FALSE;
@@ -970,7 +995,7 @@ BOOL rdp_client_connect_mcs_channel_join_confirm(rdpRdp* rdp, wStream* s)
 
 BOOL rdp_client_connect_auto_detect(rdpRdp* rdp, wStream* s)
 {
-	BYTE* mark;
+	size_t pos;
 	UINT16 length;
 	UINT16 channelId;
 
@@ -978,7 +1003,7 @@ BOOL rdp_client_connect_auto_detect(rdpRdp* rdp, wStream* s)
 	if (rdp->mcs->messageChannelId != 0)
 	{
 		/* Process any MCS message channel PDUs. */
-		Stream_GetPointer(s, mark);
+		pos = Stream_GetPosition(s);
 
 		if (rdp_read_header(rdp, s, &length, &channelId))
 		{
@@ -1003,7 +1028,7 @@ BOOL rdp_client_connect_auto_detect(rdpRdp* rdp, wStream* s)
 			}
 		}
 
-		Stream_SetPointer(s, mark);
+		Stream_SetPosition(s, pos);
 	}
 
 	return FALSE;
@@ -1033,19 +1058,21 @@ int rdp_client_connect_license(rdpRdp* rdp, wStream* s)
 
 int rdp_client_connect_demand_active(rdpRdp* rdp, wStream* s)
 {
-	BYTE* mark;
+	size_t pos;
 	UINT16 width;
 	UINT16 height;
 	UINT16 length;
 	width = rdp->settings->DesktopWidth;
 	height = rdp->settings->DesktopHeight;
-	Stream_GetPointer(s, mark);
+
+	pos = Stream_GetPosition(s);
 
 	if (!rdp_recv_demand_active(rdp, s))
 	{
 		int rc;
 		UINT16 channelId;
-		Stream_SetPointer(s, mark);
+
+		Stream_SetPosition(s, pos);
 		if (!rdp_recv_get_active_header(rdp, s, &channelId, &length))
 			return -1;
 		/* Was Stream_Seek(s, RDP_PACKET_HEADER_MAX_LENGTH);
@@ -1128,93 +1155,41 @@ int rdp_client_connect_finalize(rdpRdp* rdp)
 	return 0;
 }
 
-int rdp_client_transition_to_state(rdpRdp* rdp, int state)
+int rdp_client_transition_to_state(rdpRdp* rdp, CONNECTION_STATE state)
 {
 	int status = 0;
 
+	WLog_DBG(TAG, "%s %s --> %s", __FUNCTION__, rdp_get_state_string(rdp), rdp_state_string(state));
+	rdp_set_state(rdp, state);
+
 	switch (state)
 	{
-		case CONNECTION_STATE_INITIAL:
-			rdp->state = CONNECTION_STATE_INITIAL;
-			break;
-
-		case CONNECTION_STATE_NEGO:
-			rdp->state = CONNECTION_STATE_NEGO;
-			break;
-
-		case CONNECTION_STATE_NLA:
-			rdp->state = CONNECTION_STATE_NLA;
-			break;
-
-		case CONNECTION_STATE_MCS_CONNECT:
-			rdp->state = CONNECTION_STATE_MCS_CONNECT;
-			break;
-
-		case CONNECTION_STATE_MCS_ERECT_DOMAIN:
-			rdp->state = CONNECTION_STATE_MCS_ERECT_DOMAIN;
-			break;
-
-		case CONNECTION_STATE_MCS_ATTACH_USER:
-			rdp->state = CONNECTION_STATE_MCS_ATTACH_USER;
-			break;
-
-		case CONNECTION_STATE_MCS_CHANNEL_JOIN:
-			rdp->state = CONNECTION_STATE_MCS_CHANNEL_JOIN;
-			break;
-
-		case CONNECTION_STATE_RDP_SECURITY_COMMENCEMENT:
-			rdp->state = CONNECTION_STATE_RDP_SECURITY_COMMENCEMENT;
-			break;
-
-		case CONNECTION_STATE_SECURE_SETTINGS_EXCHANGE:
-			rdp->state = CONNECTION_STATE_SECURE_SETTINGS_EXCHANGE;
-			break;
-
-		case CONNECTION_STATE_CONNECT_TIME_AUTO_DETECT:
-			rdp->state = CONNECTION_STATE_CONNECT_TIME_AUTO_DETECT;
-			break;
-
-		case CONNECTION_STATE_LICENSING:
-			rdp->state = CONNECTION_STATE_LICENSING;
-			break;
-
-		case CONNECTION_STATE_MULTITRANSPORT_BOOTSTRAPPING:
-			rdp->state = CONNECTION_STATE_MULTITRANSPORT_BOOTSTRAPPING;
-			break;
-
-		case CONNECTION_STATE_CAPABILITIES_EXCHANGE:
-			rdp->state = CONNECTION_STATE_CAPABILITIES_EXCHANGE;
-			break;
-
 		case CONNECTION_STATE_FINALIZATION:
-			rdp->state = CONNECTION_STATE_FINALIZATION;
 			update_reset_state(rdp->update);
 			rdp->finalize_sc_pdus = 0;
 			break;
 
 		case CONNECTION_STATE_ACTIVE:
-			rdp->state = CONNECTION_STATE_ACTIVE;
-			{
-				ActivatedEventArgs activatedEvent;
-				rdpContext* context = rdp->context;
-				EventArgsInit(&activatedEvent, "libfreerdp");
-				activatedEvent.firstActivation = !rdp->deactivation_reactivation;
-				PubSub_OnActivated(context->pubSub, context, &activatedEvent);
+		{
+			ActivatedEventArgs activatedEvent;
+			rdpContext* context = rdp->context;
+			EventArgsInit(&activatedEvent, "libfreerdp");
+			activatedEvent.firstActivation = !rdp->deactivation_reactivation;
+			PubSub_OnActivated(context->pubSub, context, &activatedEvent);
 			}
 
 			break;
 
-		default:
-			status = -1;
-			break;
+		    default:
+			    break;
 	}
 
 	{
 		ConnectionStateChangeEventArgs stateEvent;
 		rdpContext* context = rdp->context;
 		EventArgsInit(&stateEvent, "libfreerdp");
-		stateEvent.state = rdp->state;
-		stateEvent.active = rdp->state == CONNECTION_STATE_ACTIVE;
+		stateEvent.state = rdp_get_state(rdp);
+		stateEvent.active = rdp_get_state(rdp) == CONNECTION_STATE_ACTIVE;
 		PubSub_OnConnectionStateChange(context->pubSub, context, &stateEvent);
 	}
 
@@ -1226,8 +1201,18 @@ BOOL rdp_server_accept_nego(rdpRdp* rdp, wStream* s)
 	UINT32 SelectedProtocol = 0;
 	UINT32 RequestedProtocols;
 	BOOL status;
-	rdpSettings* settings = rdp->settings;
-	rdpNego* nego = rdp->nego;
+	rdpSettings* settings;
+	rdpNego* nego;
+
+	WINPR_ASSERT(rdp);
+	WINPR_ASSERT(s);
+
+	settings = rdp->settings;
+	WINPR_ASSERT(settings);
+
+	nego = rdp->nego;
+	WINPR_ASSERT(nego);
+
 	transport_set_blocking_mode(rdp->transport, TRUE);
 
 	if (!nego_read_request(nego, s))
@@ -1328,7 +1313,8 @@ BOOL rdp_server_accept_mcs_connect_initial(rdpRdp* rdp, wStream* s)
 
 	for (i = 0; i < mcs->channelCount; i++)
 	{
-		WLog_INFO(TAG, " %s", mcs->channels[i].Name);
+		rdpMcsChannel* cur = &mcs->channels[i];
+		WLog_INFO(TAG, " %s", cur->Name);
 	}
 
 	if (!mcs_send_connect_response(mcs))
@@ -1381,10 +1367,11 @@ BOOL rdp_server_accept_mcs_channel_join_request(rdpRdp* rdp, wStream* s)
 
 	for (i = 0; i < mcs->channelCount; i++)
 	{
-		if (mcs->channels[i].ChannelId == channelId)
-			mcs->channels[i].joined = TRUE;
+		rdpMcsChannel* cur = &mcs->channels[i];
+		if (cur->ChannelId == channelId)
+			cur->joined = TRUE;
 
-		if (!mcs->channels[i].joined)
+		if (!cur->joined)
 			allJoined = FALSE;
 	}
 
@@ -1401,7 +1388,7 @@ BOOL rdp_server_accept_confirm_active(rdpRdp* rdp, wStream* s, UINT16 pduLength)
 {
 	freerdp_peer* peer = rdp->context->peer;
 
-	if (rdp->state != CONNECTION_STATE_CAPABILITIES_EXCHANGE)
+	if (rdp_get_state(rdp) != CONNECTION_STATE_CAPABILITIES_EXCHANGE)
 		return FALSE;
 
 	if (!rdp_recv_confirm_active(rdp, s, pduLength))
@@ -1446,78 +1433,34 @@ BOOL rdp_server_reactivate(rdpRdp* rdp)
 	return TRUE;
 }
 
-int rdp_server_transition_to_state(rdpRdp* rdp, int state)
+int rdp_server_transition_to_state(rdpRdp* rdp, CONNECTION_STATE state)
 {
 	int status = 0;
 	freerdp_peer* client = NULL;
+	const int cstate = rdp_get_state(rdp);
 
-	if (rdp->state >= CONNECTION_STATE_RDP_SECURITY_COMMENCEMENT)
+	if (cstate >= CONNECTION_STATE_RDP_SECURITY_COMMENCEMENT)
 		client = rdp->context->peer;
 
-	if (rdp->state < CONNECTION_STATE_ACTIVE)
+	if (cstate < CONNECTION_STATE_ACTIVE)
 	{
 		if (client)
 			client->activated = FALSE;
 	}
 
+	WLog_DBG(TAG, "%s %s --> %s", __FUNCTION__, rdp_get_state_string(rdp), rdp_state_string(state));
+	rdp_set_state(rdp, state);
 	switch (state)
 	{
-		case CONNECTION_STATE_INITIAL:
-			rdp->state = CONNECTION_STATE_INITIAL;
-			break;
-
-		case CONNECTION_STATE_NEGO:
-			rdp->state = CONNECTION_STATE_NEGO;
-			break;
-
-		case CONNECTION_STATE_MCS_CONNECT:
-			rdp->state = CONNECTION_STATE_MCS_CONNECT;
-			break;
-
-		case CONNECTION_STATE_MCS_ERECT_DOMAIN:
-			rdp->state = CONNECTION_STATE_MCS_ERECT_DOMAIN;
-			break;
-
-		case CONNECTION_STATE_MCS_ATTACH_USER:
-			rdp->state = CONNECTION_STATE_MCS_ATTACH_USER;
-			break;
-
-		case CONNECTION_STATE_MCS_CHANNEL_JOIN:
-			rdp->state = CONNECTION_STATE_MCS_CHANNEL_JOIN;
-			break;
-
-		case CONNECTION_STATE_RDP_SECURITY_COMMENCEMENT:
-			rdp->state = CONNECTION_STATE_RDP_SECURITY_COMMENCEMENT;
-			break;
-
-		case CONNECTION_STATE_SECURE_SETTINGS_EXCHANGE:
-			rdp->state = CONNECTION_STATE_SECURE_SETTINGS_EXCHANGE;
-			break;
-
-		case CONNECTION_STATE_CONNECT_TIME_AUTO_DETECT:
-			rdp->state = CONNECTION_STATE_CONNECT_TIME_AUTO_DETECT;
-			break;
-
-		case CONNECTION_STATE_LICENSING:
-			rdp->state = CONNECTION_STATE_LICENSING;
-			break;
-
-		case CONNECTION_STATE_MULTITRANSPORT_BOOTSTRAPPING:
-			rdp->state = CONNECTION_STATE_MULTITRANSPORT_BOOTSTRAPPING;
-			break;
-
 		case CONNECTION_STATE_CAPABILITIES_EXCHANGE:
-			rdp->state = CONNECTION_STATE_CAPABILITIES_EXCHANGE;
 			rdp->AwaitCapabilities = FALSE;
 			break;
 
 		case CONNECTION_STATE_FINALIZATION:
-			rdp->state = CONNECTION_STATE_FINALIZATION;
 			rdp->finalize_sc_pdus = 0;
 			break;
 
 		case CONNECTION_STATE_ACTIVE:
-			rdp->state = CONNECTION_STATE_ACTIVE;
 			update_reset_state(rdp->update);
 
 			if (client)
@@ -1534,7 +1477,7 @@ int rdp_server_transition_to_state(rdpRdp* rdp, int state)
 						return -1;
 				}
 
-				if (rdp->state >= CONNECTION_STATE_ACTIVE)
+				if (rdp_get_state(rdp) >= CONNECTION_STATE_ACTIVE)
 				{
 					IFCALLRET(client->Activate, client->activated, client);
 
@@ -1546,7 +1489,6 @@ int rdp_server_transition_to_state(rdpRdp* rdp, int state)
 			break;
 
 		default:
-			status = -1;
 			break;
 	}
 
@@ -1568,7 +1510,7 @@ const char* rdp_client_connection_state_string(int state)
 	}
 }
 
-const char* rdp_server_connection_state_string(int state)
+const char* rdp_state_string(CONNECTION_STATE state)
 {
 	switch (state)
 	{
@@ -1607,9 +1549,49 @@ const char* rdp_server_connection_state_string(int state)
 	}
 }
 
-int rdp_client_get_state(rdpRdp* rdp)
+CONNECTION_STATE rdp_get_state(const rdpRdp* rdp)
 {
-	if (!rdp)
-		return -1;
+	WINPR_ASSERT(rdp);
 	return rdp->state;
+}
+
+BOOL rdp_set_state(rdpRdp* rdp, CONNECTION_STATE state)
+{
+	WINPR_ASSERT(rdp);
+	rdp->state = state;
+	return TRUE;
+}
+
+const char* rdp_get_state_string(rdpRdp* rdp)
+{
+	int state = rdp_get_state(rdp);
+	return rdp_state_string(state);
+}
+
+BOOL rdp_channels_from_mcs(rdpSettings* settings, const rdpRdp* rdp)
+{
+	size_t x;
+	const rdpMcs* mcs;
+
+	WINPR_ASSERT(rdp);
+
+	mcs = rdp->mcs;
+	WINPR_ASSERT(mcs);
+
+	if (!freerdp_settings_set_pointer_len(settings, FreeRDP_ChannelDefArray, NULL,
+	                                      mcs->channelCount))
+		return FALSE;
+
+	for (x = 0; x < mcs->channelCount; x++)
+	{
+		const rdpMcsChannel* mchannel = &mcs->channels[x];
+		CHANNEL_DEF cur = { 0 };
+
+		memcpy(cur.name, mchannel->Name, sizeof(cur.name));
+		cur.options = mchannel->options;
+		if (!freerdp_settings_set_pointer_array(settings, FreeRDP_ChannelDefArray, x, &cur))
+			return FALSE;
+	}
+
+	return TRUE;
 }

@@ -566,12 +566,12 @@ out:
 }
 
 /* Glyph Class */
-static BOOL xf_Glyph_New(rdpContext* context, const rdpGlyph* glyph)
+static BOOL xf_Glyph_New(rdpContext* context, rdpGlyph* glyph)
 {
 	int scanline;
 	XImage* image;
-	xfGlyph* xf_glyph;
-	xf_glyph = (xfGlyph*)glyph;
+	xfGlyph* xf_glyph = (xfGlyph*)glyph;
+
 	xfContext* xfc = (xfContext*)context;
 	xf_lock_x11(xfc);
 	scanline = (glyph->cx + 7) / 8;
@@ -605,9 +605,9 @@ static void xf_Glyph_Free(rdpContext* context, rdpGlyph* glyph)
 static BOOL xf_Glyph_Draw(rdpContext* context, const rdpGlyph* glyph, INT32 x, INT32 y, INT32 w,
                           INT32 h, INT32 sx, INT32 sy, BOOL fOpRedundant)
 {
-	xfGlyph* xf_glyph;
+	const xfGlyph* xf_glyph = (const xfGlyph*)glyph;
 	xfContext* xfc = (xfContext*)context;
-	xf_glyph = (xfGlyph*)glyph;
+
 	xf_lock_x11(xfc);
 
 	if (!fOpRedundant)
@@ -633,7 +633,6 @@ static BOOL xf_Glyph_BeginDraw(rdpContext* context, INT32 x, INT32 y, INT32 widt
                                UINT32 bgcolor, UINT32 fgcolor, BOOL fOpRedundant)
 {
 	xfContext* xfc = (xfContext*)context;
-	XRectangle rect;
 	XColor xbgcolor, xfgcolor;
 
 	if (!xf_decode_color(xfc, bgcolor, &xbgcolor))
@@ -642,10 +641,6 @@ static BOOL xf_Glyph_BeginDraw(rdpContext* context, INT32 x, INT32 y, INT32 widt
 	if (!xf_decode_color(xfc, fgcolor, &xfgcolor))
 		return FALSE;
 
-	rect.x = x;
-	rect.y = y;
-	rect.width = width;
-	rect.height = height;
 	xf_lock_x11(xfc);
 
 	if (!fOpRedundant)

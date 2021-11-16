@@ -31,6 +31,11 @@
 
 #else
 
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wreserved-id-macro"
+#endif
+
 #define DUMMYUNIONNAME u
 #define DUMMYUNIONNAME1 u1
 #define DUMMYUNIONNAME2 u2
@@ -954,8 +959,13 @@ extern "C++"
 #define CONTAINING_RECORD(address, type, field) \
 	((type*)((PCHAR)(address) - (ULONG_PTR)(&((type*)0)->field)))
 
+#if defined(__clang__)
+#pragma clang diagnostic pop
 #endif
 
+#endif
+
+#if !defined(__MINGW32__)
 #if defined(_WIN32) || defined(__CYGWIN__)
 #ifdef __GNUC__
 #define DECLSPEC_EXPORT __attribute__((dllexport))
@@ -971,6 +981,7 @@ extern "C++"
 #else
 #define DECLSPEC_EXPORT
 #define DECLSPEC_IMPORT
+#endif
 #endif
 #endif
 

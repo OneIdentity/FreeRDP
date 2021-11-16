@@ -97,7 +97,7 @@ static BOOL wf_peer_post_connect(freerdp_peer* client)
 	wfi = context->info;
 	settings = client->settings;
 
-	if ((get_screen_info(wfi->screenID, NULL, &wfi->servscreen_width, &wfi->servscreen_height,
+	if ((get_screen_info(wfi->screenID, NULL, 0, &wfi->servscreen_width, &wfi->servscreen_height,
 	                     &wfi->bitsPerPixel) == 0) ||
 	    (wfi->servscreen_width == 0) || (wfi->servscreen_height == 0) || (wfi->bitsPerPixel == 0))
 	{
@@ -141,7 +141,8 @@ static BOOL wf_peer_activate(freerdp_peer* client)
 	return TRUE;
 }
 
-static BOOL wf_peer_logon(freerdp_peer* client, SEC_WINNT_AUTH_IDENTITY* identity, BOOL automatic)
+static BOOL wf_peer_logon(freerdp_peer* client, const SEC_WINNT_AUTH_IDENTITY* identity,
+                          BOOL automatic)
 {
 	wfreerdp_server_peer_callback_event(((rdpContext*)client->context)->peer->pId,
 	                                    FREERDP_SERVER_WIN_SRV_CALLBACK_EVENT_AUTH);
@@ -261,11 +262,11 @@ DWORD WINAPI wf_peer_main_loop(LPVOID lpParam)
 	client->PostConnect = wf_peer_post_connect;
 	client->Activate = wf_peer_activate;
 	client->Logon = wf_peer_logon;
-	client->input->SynchronizeEvent = wf_peer_synchronize_event;
-	client->input->KeyboardEvent = wf_peer_keyboard_event;
-	client->input->UnicodeKeyboardEvent = wf_peer_unicode_keyboard_event;
-	client->input->MouseEvent = wf_peer_mouse_event;
-	client->input->ExtendedMouseEvent = wf_peer_extended_mouse_event;
+	client->context->input->SynchronizeEvent = wf_peer_synchronize_event;
+	client->context->input->KeyboardEvent = wf_peer_keyboard_event;
+	client->context->input->UnicodeKeyboardEvent = wf_peer_unicode_keyboard_event;
+	client->context->input->MouseEvent = wf_peer_mouse_event;
+	client->context->input->ExtendedMouseEvent = wf_peer_extended_mouse_event;
 
 	if (!client->Initialize(client))
 		goto fail_client_initialize;
@@ -280,10 +281,10 @@ DWORD WINAPI wf_peer_main_loop(LPVOID lpParam)
 	if (wfi->input_disabled)
 	{
 		WLog_INFO(TAG, "client input is disabled");
-		client->input->KeyboardEvent = wf_peer_keyboard_event_dummy;
-		client->input->UnicodeKeyboardEvent = wf_peer_unicode_keyboard_event_dummy;
-		client->input->MouseEvent = wf_peer_mouse_event_dummy;
-		client->input->ExtendedMouseEvent = wf_peer_extended_mouse_event_dummy;
+		client->context->input->KeyboardEvent = wf_peer_keyboard_event_dummy;
+		client->context->input->UnicodeKeyboardEvent = wf_peer_unicode_keyboard_event_dummy;
+		client->context->input->MouseEvent = wf_peer_mouse_event_dummy;
+		client->context->input->ExtendedMouseEvent = wf_peer_extended_mouse_event_dummy;
 	}
 
 	if (!(context->socketEvent = CreateEvent(NULL, TRUE, FALSE, NULL)))

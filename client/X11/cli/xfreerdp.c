@@ -26,6 +26,7 @@
 #include <winpr/synch.h>
 #include <winpr/thread.h>
 
+#include <freerdp/streamdump.h>
 #include <freerdp/freerdp.h>
 #include <freerdp/client/cmdline.h>
 
@@ -41,9 +42,8 @@ int main(int argc, char* argv[])
 	DWORD dwExitCode;
 	rdpContext* context;
 	rdpSettings* settings;
-	RDP_CLIENT_ENTRY_POINTS clientEntryPoints;
+	RDP_CLIENT_ENTRY_POINTS clientEntryPoints = { 0 };
 
-	ZeroMemory(&clientEntryPoints, sizeof(RDP_CLIENT_ENTRY_POINTS));
 	clientEntryPoints.Size = sizeof(RDP_CLIENT_ENTRY_POINTS);
 	clientEntryPoints.Version = RDP_CLIENT_INTERFACE_VERSION;
 
@@ -70,6 +70,9 @@ int main(int argc, char* argv[])
 
 		goto out;
 	}
+
+	if (!stream_dump_register_handlers(context, CONNECTION_STATE_MCS_CONNECT))
+		goto out;
 
 	if (freerdp_client_start(context) != 0)
 		goto out;

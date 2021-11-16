@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include <assert.h>
+#include <winpr/assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -424,10 +424,10 @@ static BOOL urbdrc_announce_devices(IUDEVMAN* udevman)
 		if (!pdev->isAlreadySend(pdev))
 		{
 			const UINT32 deviceId = pdev->get_UsbDevice(pdev);
-			UINT error =
+			UINT cerror =
 			    urdbrc_send_virtual_channel_add(udevman->plugin, get_channel(udevman), deviceId);
 
-			if (error != ERROR_SUCCESS)
+			if (cerror != ERROR_SUCCESS)
 				break;
 		}
 	}
@@ -804,12 +804,16 @@ static UINT urbdrc_process_addin_args(URBDRC_PLUGIN* urbdrc, const ADDIN_ARGV* a
 	COMMAND_LINE_ARGUMENT_A urbdrc_args[] = {
 		{ "dbg", COMMAND_LINE_VALUE_FLAG, "", NULL, BoolValueFalse, -1, NULL, "debug" },
 		{ "sys", COMMAND_LINE_VALUE_REQUIRED, "<subsystem>", NULL, NULL, -1, NULL, "subsystem" },
+		{ "dev", COMMAND_LINE_VALUE_REQUIRED, "<device list>", NULL, NULL, -1, NULL, "devices" },
+		{ "encode", COMMAND_LINE_VALUE_FLAG, "", NULL, NULL, -1, NULL, "encode" },
+		{ "quality", COMMAND_LINE_VALUE_REQUIRED, "<[0-2] -> [high-medium-low]>", NULL, NULL, -1,
+		  NULL, "quality" },
 		{ NULL, 0, NULL, NULL, NULL, -1, NULL, NULL }
 	};
 
 	const DWORD flags =
 	    COMMAND_LINE_SIGIL_NONE | COMMAND_LINE_SEPARATOR_COLON | COMMAND_LINE_IGN_UNKNOWN_KEYWORD;
-	COMMAND_LINE_ARGUMENT_A* arg;
+	const COMMAND_LINE_ARGUMENT_A* arg;
 	status =
 	    CommandLineParseArgumentsA(args->argc, args->argv, urbdrc_args, flags, urbdrc, NULL, NULL);
 
@@ -964,8 +968,7 @@ UINT DVCPluginEntry(IDRDYNVC_ENTRY_POINTS* pEntryPoints)
 		urbdrc->iface.Initialize = urbdrc_plugin_initialize;
 		urbdrc->iface.Terminated = urbdrc_plugin_terminated;
 		urbdrc->vchannel_status = INIT_CHANNEL_IN;
-		status =
-		    pEntryPoints->RegisterPlugin(pEntryPoints, URBDRC_CHANNEL_NAME, (IWTSPlugin*)urbdrc);
+		status = pEntryPoints->RegisterPlugin(pEntryPoints, URBDRC_CHANNEL_NAME, &urbdrc->iface);
 
 		if (status != CHANNEL_RC_OK)
 			goto fail;
@@ -984,7 +987,7 @@ UINT DVCPluginEntry(IDRDYNVC_ENTRY_POINTS* pEntryPoints)
 	if (!urbdrc->subsystem && !urbdrc_set_subsystem(urbdrc, "libusb"))
 		goto fail;
 
-	return urbdrc_load_udevman_addin((IWTSPlugin*)urbdrc, urbdrc->subsystem, args);
+	return urbdrc_load_udevman_addin(&urbdrc->iface, urbdrc->subsystem, args);
 fail:
 	urbdrc_plugin_terminated(&urbdrc->iface);
 	return status;

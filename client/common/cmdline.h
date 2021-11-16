@@ -26,7 +26,7 @@
 
 #include <winpr/cmdline.h>
 
-static const COMMAND_LINE_ARGUMENT_A args[] = {
+static const COMMAND_LINE_ARGUMENT_A global_cmd_args[] = {
 	{ "a", COMMAND_LINE_VALUE_REQUIRED, "<addin>[,<options>]", NULL, NULL, -1, "addin", "Addin" },
 	{ "action-script", COMMAND_LINE_VALUE_REQUIRED, "<file-name>", "~/.config/freerdp/action.sh",
 	  NULL, -1, NULL, "Action script" },
@@ -163,9 +163,11 @@ static const COMMAND_LINE_ARGUMENT_A args[] = {
 #ifdef WITH_GFX_H264
 	{ "gfx", COMMAND_LINE_VALUE_OPTIONAL, "[[RFX|AVC420|AVC444],mask:<value>]", NULL, NULL, -1,
 	  NULL, "RDP8 graphics pipeline" },
+#if defined(WITH_FREERDP_DEPRECATED)
 	{ "gfx-h264", COMMAND_LINE_VALUE_OPTIONAL,
 	  "[[AVC420|AVC444],mask:<value>] [DEPRECATED] use /gfx:avc420 instead", NULL, NULL, -1, NULL,
 	  "RDP8.1 graphics pipeline using H264 codec" },
+#endif
 #else
 	{ "gfx", COMMAND_LINE_VALUE_OPTIONAL, "RFX", NULL, NULL, -1, NULL, "RDP8 graphics pipeline" },
 #endif
@@ -209,6 +211,8 @@ static const COMMAND_LINE_ARGUMENT_A args[] = {
 	  "Function key value" },
 	{ "kbd-list", COMMAND_LINE_VALUE_FLAG | COMMAND_LINE_PRINT, NULL, NULL, NULL, -1, NULL,
 	  "List keyboard layouts" },
+	{ "kbd-scancode-list", COMMAND_LINE_VALUE_FLAG | COMMAND_LINE_PRINT, NULL, NULL, NULL, -1, NULL,
+	  "List keyboard RDP scancodes" },
 	{ "kbd-lang-list", COMMAND_LINE_VALUE_OPTIONAL | COMMAND_LINE_PRINT, NULL, NULL, NULL, -1, NULL,
 	  "List keyboard languages" },
 	{ "kbd-remap", COMMAND_LINE_VALUE_REQUIRED,
@@ -217,6 +221,9 @@ static const COMMAND_LINE_ARGUMENT_A args[] = {
 	{ "kbd-subtype", COMMAND_LINE_VALUE_REQUIRED, "<id>", NULL, NULL, -1, NULL,
 	  "Keyboard subtype" },
 	{ "kbd-type", COMMAND_LINE_VALUE_REQUIRED, "<id>", NULL, NULL, -1, NULL, "Keyboard type" },
+	{ "kbd-unicode", COMMAND_LINE_VALUE_FLAG, "", NULL, NULL, -1, NULL,
+	  "Send unicode symbols, e.g. use the local keyboard map. ATTENTION: Does not work with every "
+	  "RDP server!" },
 	{ "load-balance-info", COMMAND_LINE_VALUE_REQUIRED, "<info-string>", NULL, NULL, -1, NULL,
 	  "Load balance info" },
 	{ "log-filters", COMMAND_LINE_VALUE_REQUIRED, "<tag>:<level>[,<tag>:<level>[,...]]", NULL, NULL,
@@ -341,6 +348,9 @@ static const COMMAND_LINE_ARGUMENT_A args[] = {
 	  "SPN authentication service class" },
 	{ "ssh-agent", COMMAND_LINE_VALUE_FLAG, NULL, NULL, NULL, -1, "ssh-agent",
 	  "SSH Agent forwarding channel" },
+	{ "disable-output", COMMAND_LINE_VALUE_FLAG, NULL, NULL, NULL, -1, NULL,
+	  "Deactivate all graphics decoding in the client session. Useful for load tests with many "
+	  "simultaneous connections" },
 	{ "t", COMMAND_LINE_VALUE_REQUIRED, "<title>", NULL, NULL, -1, "title", "Window title" },
 	{ "themes", COMMAND_LINE_VALUE_BOOL, NULL, BoolValueTrue, NULL, -1, NULL, "themes" },
 	{ "timeout", COMMAND_LINE_VALUE_REQUIRED, "<time in ms>", "9000", NULL, -1, "timeout",

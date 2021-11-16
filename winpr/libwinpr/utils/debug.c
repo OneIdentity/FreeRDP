@@ -45,6 +45,7 @@
 #include <winpr/wlog.h>
 #include <winpr/debug.h>
 
+#define MIN(a, b) (a) < (b) ? (a) : (b)
 #define TAG "com.winpr.utils.debug"
 #define LOGT(...)                                           \
 	do                                                      \
@@ -259,10 +260,7 @@ USHORT RtlCaptureStackBackTrace(ULONG FramesToSkip, ULONG FramesToCapture, PVOID
 void winpr_backtrace_free(void* buffer)
 {
 	if (!buffer)
-	{
-		LOGF(support_msg);
 		return;
-	}
 
 #if defined(HAVE_EXECINFO_H)
 	t_execinfo* data = (t_execinfo*)buffer;
@@ -434,7 +432,7 @@ char** winpr_backtrace_symbols(void* buffer, size_t* used)
 		}
 
 		line->SizeOfStruct = sizeof(IMAGEHLP_LINE64);
-		symbol->MaxNameLen = line_len;
+		symbol->MaxNameLen = (ULONG)line_len;
 		symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
 
 		/* Set the pointers in the allocated buffer's initial array section */
@@ -494,7 +492,7 @@ void winpr_backtrace_symbols_fd(void* buffer, int fd)
 		if (lines)
 		{
 			for (i = 0; i < used; i++)
-				write(fd, lines[i], strlen(lines[i]));
+				write(fd, lines[i], (unsigned)strnlen(lines[i], UINT32_MAX));
 		}
 	}
 #else
@@ -516,8 +514,7 @@ void winpr_log_backtrace_ex(wLog* log, DWORD level, DWORD size)
 	if (!stack)
 	{
 		WLog_Print(log, WLOG_ERROR, "winpr_backtrace failed!\n");
-		winpr_backtrace_free(stack);
-		return;
+		goto fail;
 	}
 
 	msg = winpr_backtrace_symbols(stack, &used);
@@ -529,6 +526,7 @@ void winpr_log_backtrace_ex(wLog* log, DWORD level, DWORD size)
 	}
 	free(msg);
 
+fail:
 	winpr_backtrace_free(stack);
 }
 
@@ -553,11 +551,11 @@ char* winpr_strerror(DWORD dw, char* dmsg, size_t size)
 	if (rc)
 	{
 #if defined(UNICODE)
-		WideCharToMultiByte(CP_ACP, 0, msg, rc, dmsg, size - 1, NULL, NULL);
+		WideCharToMultiByte(CP_ACP, 0, msg, rc, dmsg, (int)MIN(size - 1, INT_MAX), NULL, NULL);
 #else  /* defined(UNICODE) */
-		memcpy(dmsg, msg, min(rc, size - 1));
+		memcpy(dmsg, msg, MIN(rc, size - 1));
 #endif /* defined(UNICODE) */
-		dmsg[min(rc, size - 1)] = 0;
+		dmsg[MIN(rc, size - 1)] = 0;
 #ifdef FORMAT_MESSAGE_ALLOCATE_BUFFER
 		LocalFree(msg);
 #else

@@ -1001,8 +1001,9 @@ static BOOL xf_gdi_update_screen(xfContext* xfc, const BYTE* pSrcData, UINT32 sc
 		UINT32 width = rects[i].right - rects[i].left;
 		UINT32 height = rects[i].bottom - rects[i].top;
 		const BYTE* src = pSrcData + top * scanline + bpp * left;
-		image = XCreateImage(xfc->display, xfc->visual, xfc->depth, ZPixmap, 0, (char*)src, width,
-		                     height, xfc->scanline_pad, scanline);
+		image = XCreateImage(xfc->display, xfc->visual, xfc->depth, ZPixmap, 0,
+		                     (char*)/* API does not modify */ src, width, height, xfc->scanline_pad,
+		                     scanline);
 
 		if (!image)
 			break;

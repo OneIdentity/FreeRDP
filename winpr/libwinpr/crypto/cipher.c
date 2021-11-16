@@ -29,6 +29,9 @@
 #include <openssl/rc4.h>
 #include <openssl/des.h>
 #include <openssl/evp.h>
+#if defined(OPENSSL_VERSION_MAJOR) && (OPENSSL_VERSION_MAJOR >= 3)
+#include <openssl/provider.h>
+#endif
 #endif
 
 #ifdef WITH_MBEDTLS
@@ -55,6 +58,14 @@ static WINPR_RC4_CTX* winpr_RC4_New_Internal(const BYTE* key, size_t keylen, BOO
 
 #if defined(WITH_OPENSSL)
 
+	if (keylen > INT_MAX)
+		return NULL;
+
+#if defined(OPENSSL_VERSION_MAJOR) && (OPENSSL_VERSION_MAJOR >= 3)
+	if (OSSL_PROVIDER_load(NULL, "legacy") == NULL)
+		return NULL;
+#endif
+
 	if (!(ctx = (WINPR_RC4_CTX*)EVP_CIPHER_CTX_new()))
 		return NULL;
 
@@ -64,7 +75,12 @@ static WINPR_RC4_CTX* winpr_RC4_New_Internal(const BYTE* key, size_t keylen, BOO
 		return NULL;
 
 	EVP_CIPHER_CTX_init((EVP_CIPHER_CTX*)ctx);
-	EVP_EncryptInit_ex((EVP_CIPHER_CTX*)ctx, evp, NULL, NULL, NULL);
+	if (EVP_EncryptInit_ex((EVP_CIPHER_CTX*)ctx, evp, NULL, NULL, NULL) != 1)
+	{
+		EVP_CIPHER_CTX_free ((EVP_CIPHER_CTX*)ctx);
+		return NULL;
+	}
+
 	/* EVP_CIPH_FLAG_NON_FIPS_ALLOW does not exist before openssl 1.0.1 */
 #if !(OPENSSL_VERSION_NUMBER < 0x10001000L)
 
@@ -72,8 +88,12 @@ static WINPR_RC4_CTX* winpr_RC4_New_Internal(const BYTE* key, size_t keylen, BOO
 		EVP_CIPHER_CTX_set_flags((EVP_CIPHER_CTX*)ctx, EVP_CIPH_FLAG_NON_FIPS_ALLOW);
 
 #endif
-	EVP_CIPHER_CTX_set_key_length((EVP_CIPHER_CTX*)ctx, keylen);
-	EVP_EncryptInit_ex((EVP_CIPHER_CTX*)ctx, NULL, NULL, key, NULL);
+	EVP_CIPHER_CTX_set_key_length((EVP_CIPHER_CTX*)ctx, (int)keylen);
+	if (EVP_EncryptInit_ex((EVP_CIPHER_CTX*)ctx, NULL, NULL, key, NULL) != 1)
+	{
+		EVP_CIPHER_CTX_free ((EVP_CIPHER_CTX*)ctx);
+		return NULL;
+	}
 #elif defined(WITH_MBEDTLS) && defined(MBEDTLS_ARC4_C)
 
 	if (!(ctx = (WINPR_RC4_CTX*)calloc(1, sizeof(mbedtls_arc4_context))))
@@ -99,7 +119,10 @@ BOOL winpr_RC4_Update(WINPR_RC4_CTX* ctx, size_t length, const BYTE* input, BYTE
 {
 #if defined(WITH_OPENSSL)
 	int outputLength;
-	EVP_CipherUpdate((EVP_CIPHER_CTX*)ctx, output, &outputLength, input, length);
+	if (length > INT_MAX)
+		return FALSE;
+
+	EVP_CipherUpdate((EVP_CIPHER_CTX*)ctx, output, &outputLength, input, (int)length);
 	return TRUE;
 #elif defined(WITH_MBEDTLS) && defined(MBEDTLS_ARC4_C)
 
@@ -619,7 +642,10 @@ BOOL winpr_Cipher_Update(WINPR_CIPHER_CTX* ctx, const BYTE* input, size_t ilen, 
 #if defined(WITH_OPENSSL)
 	int outl = (int)*olen;
 
-	if (EVP_CipherUpdate((EVP_CIPHER_CTX*)ctx, output, &outl, input, ilen) == 1)
+	if (ilen > INT_MAX)
+		return FALSE;
+
+	if (EVP_CipherUpdate((EVP_CIPHER_CTX*)ctx, output, &outl, input, (int)ilen) == 1)
 	{
 		*olen = (size_t)outl;
 		return TRUE;

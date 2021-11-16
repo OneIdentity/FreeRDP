@@ -230,11 +230,12 @@ static BOOL freerdp_listener_open_from_socket(freerdp_listener* instance, int fd
 		return FALSE;
 
 	listener->sockfds[listener->num_sockfds] = fd;
-	listener->events[listener->num_sockfds] =
-	    CreateFileDescriptorEvent(NULL, FALSE, FALSE, fd, WINPR_FD_READ);
+	listener->events[listener->num_sockfds] = WSACreateEvent();
 
 	if (!listener->events[listener->num_sockfds])
 		return FALSE;
+
+	WSAEventSelect(fd, listener->events[listener->num_sockfds], FD_READ | FD_ACCEPT | FD_CLOSE);
 
 	listener->num_sockfds++;
 	WLog_INFO(TAG, "Listening on socket %d.", fd);
@@ -295,16 +296,51 @@ static DWORD freerdp_listener_get_event_handles(freerdp_listener* instance, HAND
 	return listener->num_sockfds;
 }
 
+BOOL freerdp_peer_set_local_and_hostname(freerdp_peer* client,
+                                         const struct sockaddr_storage* peer_addr)
+{
+	void* sin_addr = NULL;
+	const BYTE localhost6_bytes[] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 };
+
+	WINPR_ASSERT(client);
+	WINPR_ASSERT(peer_addr);
+
+	if (peer_addr->ss_family == AF_INET)
+	{
+		sin_addr = &(((struct sockaddr_in*)peer_addr)->sin_addr);
+
+		if ((*(UINT32*)sin_addr) == 0x0100007f)
+			client->local = TRUE;
+	}
+	else if (peer_addr->ss_family == AF_INET6)
+	{
+		sin_addr = &(((struct sockaddr_in6*)peer_addr)->sin6_addr);
+
+		if (memcmp(sin_addr, localhost6_bytes, 16) == 0)
+			client->local = TRUE;
+	}
+
+#ifndef _WIN32
+#ifdef AF_VSOCK
+	else if (peer_addr->ss_family == AF_UNIX || peer_addr->ss_family == AF_VSOCK)
+#else
+	else if (peer_addr->ss_family == AF_UNIX)
+#endif
+		client->local = TRUE;
+#endif
+
+	if (sin_addr)
+		inet_ntop(peer_addr->ss_family, sin_addr, client->hostname, sizeof(client->hostname));
+
+	return TRUE;
+}
 static BOOL freerdp_listener_check_fds(freerdp_listener* instance)
 {
 	int i;
-	void* sin_addr;
 	int peer_sockfd;
-	freerdp_peer* client = NULL;
 	int peer_addr_size;
 	struct sockaddr_storage peer_addr;
 	rdpListener* listener = (rdpListener*)instance->listener;
-	static const BYTE localhost6_bytes[] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 };
 	BOOL peer_accepted;
 
 	if (listener->num_sockfds < 1)
@@ -312,6 +348,8 @@ static BOOL freerdp_listener_check_fds(freerdp_listener* instance)
 
 	for (i = 0; i < listener->num_sockfds; i++)
 	{
+		freerdp_peer* client = NULL;
+
 		WSAResetEvent(listener->events[i]);
 		peer_addr_size = sizeof(peer_addr);
 		peer_sockfd = _accept(listener->sockfds[i], (struct sockaddr*)&peer_addr, &peer_addr_size);
@@ -319,6 +357,7 @@ static BOOL freerdp_listener_check_fds(freerdp_listener* instance)
 
 		if (peer_sockfd == -1)
 		{
+			char buffer[8192] = { 0 };
 #ifdef _WIN32
 			int wsa_error = WSAGetLastError();
 
@@ -332,8 +371,8 @@ static BOOL freerdp_listener_check_fds(freerdp_listener* instance)
 				continue;
 
 #endif
-			WLog_DBG(TAG, "accept");
-			free(client);
+			WLog_WARN(TAG, "accept failed with %s", winpr_strerror(errno, buffer, sizeof(buffer)));
+			freerdp_peer_free(client);
 			return FALSE;
 		}
 
@@ -345,38 +384,17 @@ static BOOL freerdp_listener_check_fds(freerdp_listener* instance)
 			return FALSE;
 		}
 
-		sin_addr = NULL;
-
-		if (peer_addr.ss_family == AF_INET)
+		if (!freerdp_peer_set_local_and_hostname(client, &peer_addr))
 		{
-			sin_addr = &(((struct sockaddr_in*)&peer_addr)->sin_addr);
-
-			if ((*(UINT32*)sin_addr) == 0x0100007f)
-				client->local = TRUE;
+			freerdp_peer_free(client);
+			return FALSE;
 		}
-		else if (peer_addr.ss_family == AF_INET6)
-		{
-			sin_addr = &(((struct sockaddr_in6*)&peer_addr)->sin6_addr);
-
-			if (memcmp(sin_addr, localhost6_bytes, 16) == 0)
-				client->local = TRUE;
-		}
-
-#ifndef _WIN32
-		else if (peer_addr.ss_family == AF_UNIX)
-			client->local = TRUE;
-
-#endif
-
-		if (sin_addr)
-			inet_ntop(peer_addr.ss_family, sin_addr, client->hostname, sizeof(client->hostname));
 
 		IFCALLRET(instance->PeerAccepted, peer_accepted, instance, client);
 
 		if (!peer_accepted)
 		{
 			WLog_ERR(TAG, "PeerAccepted callback failed");
-			closesocket((SOCKET)peer_sockfd);
 			freerdp_peer_free(client);
 		}
 	}
