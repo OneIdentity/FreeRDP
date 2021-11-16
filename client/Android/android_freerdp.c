@@ -56,7 +56,7 @@
 #define TAG CLIENT_TAG("android")
 
 /* Defines the JNI version supported by this library. */
-#define FREERDP_JNI_VERSION "2.3.0"
+#define FREERDP_JNI_VERSION "2.4.1"
 
 static void android_OnChannelConnectedEventHandler(void* context, ChannelConnectedEventArgs* e)
 {
@@ -315,7 +315,7 @@ static BOOL android_post_connect(freerdp* instance)
 	update = instance->update;
 	settings = instance->settings;
 
-	if (!gdi_init(instance, PIXEL_FORMAT_RGBA32))
+	if (!gdi_init(instance, PIXEL_FORMAT_RGBX32))
 		return FALSE;
 
 	if (!android_register_pointer(instance->context->graphics))
@@ -894,7 +894,7 @@ static jboolean JNICALL jni_freerdp_update_graphics(JNIEnv* env, jclass cls, jlo
 	switch (info.format)
 	{
 		case ANDROID_BITMAP_FORMAT_RGBA_8888:
-			DstFormat = PIXEL_FORMAT_RGBA32;
+			DstFormat = PIXEL_FORMAT_RGBX32;
 			break;
 
 		case ANDROID_BITMAP_FORMAT_RGB_565:
@@ -996,7 +996,7 @@ static jboolean JNICALL jni_freerdp_send_clipboard_data(JNIEnv* env, jclass cls,
 	ANDROID_EVENT* event;
 	freerdp* inst = (freerdp*)instance;
 	const jbyte* data = jdata != NULL ? (*env)->GetStringUTFChars(env, jdata, NULL) : NULL;
-	int data_length = data ? strlen(data) : 0;
+	const size_t data_length = data ? (*env)->GetStringUTFLength(env, data) : 0;
 	jboolean ret = JNI_FALSE;
 	event = (ANDROID_EVENT*)android_event_clipboard_new((void*)data, data_length);
 

@@ -93,7 +93,7 @@ static BOOL freerdp_path_valid(const char* path, BOOL* special)
 	                ? TRUE
 	                : FALSE;
 	if (!isSpecial)
-		isPath = PathFileExistsA(path);
+		isPath = winpr_PathFileExists(path);
 
 	if (special)
 		*special = isSpecial;
@@ -120,6 +120,23 @@ static BOOL freerdp_sanitize_drive_name(char* name, const char* invalid, const c
 	return TRUE;
 }
 
+static char* name_from_path(const char* path)
+{
+	const char* name = "NULL";
+	if (path)
+	{
+		if (_strnicmp(path, "%", 2) == 0)
+			name = "home";
+		else if (_strnicmp(path, "*", 2) == 0)
+			name = "hotplug-all";
+		else if (_strnicmp(path, "DynamicDrives", 2) == 0)
+			name = "hotplug";
+		else
+			name = path;
+	}
+	return _strdup(name);
+}
+
 static BOOL freerdp_client_add_drive(rdpSettings* settings, const char* path, const char* name)
 {
 	RDPDR_DRIVE* drive;
@@ -134,9 +151,9 @@ static BOOL freerdp_client_add_drive(rdpSettings* settings, const char* path, co
 	if (name)
 	{
 		/* Path was entered as secondary argument, swap */
-		if (PathFileExistsA(name))
+		if (winpr_PathFileExists(name))
 		{
-			if (!PathFileExistsA(path) || (!PathIsRelativeA(name) && PathIsRelativeA(path)))
+			if (!winpr_PathFileExists(path) || (!PathIsRelativeA(name) && PathIsRelativeA(path)))
 			{
 				const char* tmp = path;
 				path = name;
@@ -151,8 +168,10 @@ static BOOL freerdp_client_add_drive(rdpSettings* settings, const char* path, co
 			goto fail;
 	}
 	else /* We need a name to send to the server. */
-	    if (!(drive->Name = _strdup(path)))
-		goto fail;
+	{
+		if (!(drive->Name = name_from_path(path)))
+			goto fail;
+	}
 
 	if (!path || !freerdp_sanitize_drive_name(drive->Name, "\\/", "__"))
 		goto fail;
@@ -1341,8 +1360,10 @@ static int freerdp_detect_posix_style_command_line_syntax(int argc, char** argv,
 
 static BOOL freerdp_client_detect_command_line(int argc, char** argv, DWORD* flags)
 {
+#if !defined(DEFINE_NO_DEPRECATED)
 	int old_cli_status;
 	size_t old_cli_count;
+#endif
 	int posix_cli_status;
 	size_t posix_cli_count;
 	int windows_cli_status;
@@ -1353,7 +1374,10 @@ static BOOL freerdp_client_detect_command_line(int argc, char** argv, DWORD* fla
 	    argc, argv, &windows_cli_count, ignoreUnknown);
 	posix_cli_status =
 	    freerdp_detect_posix_style_command_line_syntax(argc, argv, &posix_cli_count, ignoreUnknown);
+#if !defined(DEFINE_NO_DEPRECATED)
 	old_cli_status = freerdp_detect_old_command_line_syntax(argc, argv, &old_cli_count);
+#endif
+
 	/* Default is POSIX syntax */
 	*flags = COMMAND_LINE_SEPARATOR_SPACE;
 	*flags |= COMMAND_LINE_SIGIL_DASH | COMMAND_LINE_SIGIL_DOUBLE_DASH;
@@ -1370,6 +1394,7 @@ static BOOL freerdp_client_detect_command_line(int argc, char** argv, DWORD* fla
 		*flags = COMMAND_LINE_SEPARATOR_COLON;
 		*flags |= COMMAND_LINE_SIGIL_SLASH | COMMAND_LINE_SIGIL_PLUS_MINUS;
 	}
+#if !defined(DEFINE_NO_DEPRECATED)
 	else if (old_cli_status >= 0)
 	{
 		/* Ignore legacy parsing in case there is an error in the command line. */
@@ -1380,9 +1405,13 @@ static BOOL freerdp_client_detect_command_line(int argc, char** argv, DWORD* fla
 			compatibility = TRUE;
 		}
 	}
-
 	WLog_DBG(TAG, "windows: %d/%d posix: %d/%d compat: %d/%d", windows_cli_status,
 	         windows_cli_count, posix_cli_status, posix_cli_count, old_cli_status, old_cli_count);
+#else
+	WLog_DBG(TAG, "windows: %d/%d posix: %d/%d", windows_cli_status, windows_cli_count,
+	         posix_cli_status, posix_cli_count);
+#endif
+
 	return compatibility;
 }
 
@@ -1574,12 +1603,17 @@ int freerdp_client_settings_parse_command_line_arguments(rdpSettings* settings, 
 	freerdp_settings_set_string(settings, FreeRDP_ProxyUsername, NULL);
 	freerdp_settings_set_string(settings, FreeRDP_ProxyPassword, NULL);
 
+#if !defined(DEFINE_NO_DEPRECATED)
 	if (compatibility)
 	{
+		WLog_WARN(TAG, "----------------------------------------");
 		WLog_WARN(TAG, "Using deprecated command-line interface!");
+		WLog_WARN(TAG, "This will be removed with FreeRDP 3!");
+		WLog_WARN(TAG, "----------------------------------------");
 		return freerdp_client_parse_old_command_line_arguments(argc, argv, settings);
 	}
 	else
+#endif
 	{
 		if (allowUnknown)
 			flags |= COMMAND_LINE_IGN_UNKNOWN_KEYWORD;
@@ -2234,15 +2268,29 @@ int freerdp_client_settings_parse_command_line_arguments(rdpSettings* settings, 
 				settings->GatewayRpcTransport = TRUE;
 				settings->GatewayHttpTransport = FALSE;
 			}
-			else if (_stricmp(arg->Value, "http") == 0)
+			else
 			{
-				settings->GatewayRpcTransport = FALSE;
-				settings->GatewayHttpTransport = TRUE;
-			}
-			else if (_stricmp(arg->Value, "auto") == 0)
-			{
-				settings->GatewayRpcTransport = TRUE;
-				settings->GatewayHttpTransport = TRUE;
+				char* c = strchr(arg->Value, ',');
+				if (c)
+				{
+					*c++ = '\0';
+					if (_stricmp(c, "no-websockets") != 0)
+					{
+						return COMMAND_LINE_ERROR_UNEXPECTED_VALUE;
+					}
+					freerdp_settings_set_bool(settings, FreeRDP_GatewayHttpUseWebsockets, FALSE);
+				}
+
+				if (_stricmp(arg->Value, "http") == 0)
+				{
+					settings->GatewayRpcTransport = FALSE;
+					settings->GatewayHttpTransport = TRUE;
+				}
+				else if (_stricmp(arg->Value, "auto") == 0)
+				{
+					settings->GatewayRpcTransport = TRUE;
+					settings->GatewayHttpTransport = TRUE;
+				}
 			}
 		}
 		CommandLineSwitchCase(arg, "gat")
@@ -2582,6 +2630,7 @@ int freerdp_client_settings_parse_command_line_arguments(rdpSettings* settings, 
 			if (enable)
 				settings->SupportGraphicsPipeline = TRUE;
 		}
+#if !defined(DEFINE_NO_DEPRECATED)
 #ifdef WITH_GFX_H264
 		CommandLineSwitchCase(arg, "gfx-h264")
 		{
@@ -2631,6 +2680,7 @@ int freerdp_client_settings_parse_command_line_arguments(rdpSettings* settings, 
 					return rc;
 			}
 		}
+#endif
 #endif
 		CommandLineSwitchCase(arg, "rfx")
 		{
@@ -2875,6 +2925,7 @@ int freerdp_client_settings_parse_command_line_arguments(rdpSettings* settings, 
 			if (rc)
 				return rc;
 		}
+#if !defined(DEFINE_NO_DEPRECATED)
 		CommandLineSwitchCase(arg, "cert-name")
 		{
 			if (!copy_value(arg->Value, &settings->CertificateName))
@@ -2892,6 +2943,7 @@ int freerdp_client_settings_parse_command_line_arguments(rdpSettings* settings, 
 		{
 			settings->AutoDenyCertificate = enable;
 		}
+#endif
 		CommandLineSwitchCase(arg, "authentication")
 		{
 			settings->Authentication = enable;
@@ -3543,6 +3595,7 @@ BOOL freerdp_client_load_addins(rdpChannels* channels, rdpSettings* settings)
 			/* Syntax: Comma seperated list of the following entries:
 			 * '*'              ... Redirect all drives, including hotplug
 			 * 'DynamicDrives'  ... hotplug
+			 * '%'              ... user home directory
 			 * <label>(<path>)  ... One or more paths to redirect.
 			 * <path>(<label>)  ... One or more paths to redirect.
 			 * <path>           ... One or more paths to redirect.

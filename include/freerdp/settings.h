@@ -120,7 +120,9 @@ typedef enum
 #define RNS_UD_CS_STRONG_ASYMMETRIC_KEYS 0x0008
 #define RNS_UD_CS_VALID_CONNECTION_TYPE 0x0020
 #define RNS_UD_CS_SUPPORT_MONITOR_LAYOUT_PDU 0x0040
+#if !defined(DEFINE_NO_DEPRECATED)
 #define RNS_UD_CS_SUPPORT_NETWORK_AUTODETECT 0x0080 /* DEPRECATED: Compatibility define */
+#endif
 #define RNS_UD_CS_SUPPORT_NETCHAR_AUTODETECT 0x0080
 #define RNS_UD_CS_SUPPORT_DYNVC_GFX_PROTOCOL 0x0100
 #define RNS_UD_CS_SUPPORT_DYNAMIC_TIME_ZONE 0x0200
@@ -751,6 +753,7 @@ typedef struct _RDPDR_PARALLEL RDPDR_PARALLEL;
 #define FreeRDP_GatewayAccessToken (1997)
 #define FreeRDP_GatewayAcceptedCert (1998)
 #define FreeRDP_GatewayAcceptedCertLength (1999)
+#define FreeRDP_GatewayHttpUseWebsockets (2000)
 #define FreeRDP_ProxyType (2015)
 #define FreeRDP_ProxyHostname (2016)
 #define FreeRDP_ProxyPort (2017)
@@ -1252,7 +1255,8 @@ struct rdp_settings
 	ALIGN64 char* GatewayAccessToken;         /* 1997 */
 	ALIGN64 char* GatewayAcceptedCert;        /* 1998 */
 	ALIGN64 UINT32 GatewayAcceptedCertLength; /* 1999 */
-	UINT64 padding2015[2015 - 2000];          /* 2000 */
+	ALIGN64 BOOL GatewayHttpUseWebsockets;    /* 2000 */
+	UINT64 padding2015[2015 - 2001];          /* 2001 */
 
 	/* Proxy */
 	ALIGN64 UINT32 ProxyType;        /* 2015 */
@@ -1634,6 +1638,7 @@ extern "C"
 	                                                     UINT32 GatewayEnabled,
 	                                                     UINT32 GatewayBypassLocal);
 
+#if !defined(DEFINE_NO_DEPRECATED)
 	/* DEPRECATED:
 	 * the functions freerdp_get_param_* and freerdp_set_param_* are deprecated.
 	 * use freerdp_settings_get_* and freerdp_settings_set_* as a replacement!
@@ -1660,6 +1665,7 @@ extern "C"
 	                                                            int id));
 	FREERDP_API WINPR_DEPRECATED(int freerdp_set_param_string(rdpSettings* settings, int id,
 	                                                          const char* param));
+#endif
 
 	FREERDP_API BOOL freerdp_settings_get_bool(const rdpSettings* settings, size_t id);
 	FREERDP_API BOOL freerdp_settings_set_bool(rdpSettings* settings, size_t id, BOOL param);

@@ -82,9 +82,9 @@ static char* get_printer_config_path(const rdpSettings* settings, const WCHAR* n
 	char* bname = crypto_base64_encode((const BYTE*)name, (int)length);
 	char* config = GetCombinedPath(dir, bname);
 
-	if (config && !PathFileExistsA(config))
+	if (config && !winpr_PathFileExists(config))
 	{
-		if (!PathMakePathA(config, NULL))
+		if (!winpr_PathMakePath(config, NULL))
 		{
 			free(config);
 			config = NULL;
@@ -145,7 +145,7 @@ static BOOL printer_config_valid(const char* path)
 	if (!path)
 		return FALSE;
 
-	if (!PathFileExistsA(path))
+	if (!winpr_PathFileExists(path))
 		return FALSE;
 
 	return TRUE;
@@ -261,7 +261,7 @@ static BOOL printer_remove_config(const rdpSettings* settings, const WCHAR* name
 	if (!printer_config_valid(path))
 		goto fail;
 
-	rc = RemoveDirectoryA(path);
+	rc = winpr_RemoveDirectory(path);
 fail:
 	free(path);
 	return rc;
@@ -275,7 +275,7 @@ static BOOL printer_move_config(const rdpSettings* settings, const WCHAR* oldNam
 	char* newPath = get_printer_config_path(settings, newName, newLength);
 
 	if (printer_config_valid(oldPath))
-		rc = MoveFileA(oldPath, newPath);
+		rc = winpr_MoveFile(oldPath, newPath);
 
 	free(oldPath);
 	free(newPath);
@@ -979,7 +979,7 @@ printer_DeviceServiceEntry
 
 	device = (RDPDR_PRINTER*)pEntryPoints->device;
 	name = device->Name;
-	driver_name = device->DriverName;
+	driver_name = _strdup(device->DriverName);
 
 	/* Secondary argument is one of the following:
 	 *
@@ -1016,7 +1016,8 @@ printer_DeviceServiceEntry
 	if (!driver)
 	{
 		WLog_ERR(TAG, "Could not get a printer driver!");
-		return CHANNEL_RC_INITIALIZATION_ERROR;
+		error = CHANNEL_RC_INITIALIZATION_ERROR;
+		goto fail;
 	}
 
 	if (name && name[0])
@@ -1064,7 +1065,9 @@ printer_DeviceServiceEntry
 	}
 
 fail:
-	driver->ReleaseRef(driver);
+	free(driver_name);
+	if (driver)
+		driver->ReleaseRef(driver);
 
 	return error;
 }

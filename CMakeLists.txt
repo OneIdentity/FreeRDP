@@ -74,6 +74,10 @@ include(InstallFreeRDPMan)
 include(GetGitRevisionDescription)
 include(SetFreeRDPCMakeInstallDir)
 
+if (DEFINE_NO_DEPRECATED)
+    add_definitions(-DDEFINE_NO_DEPRECATED)
+endif()
+
 # Soname versioning
 set(BUILD_NUMBER 0)
 if ($ENV{BUILD_NUMBER})
@@ -81,7 +85,7 @@ if ($ENV{BUILD_NUMBER})
 endif()
 set(WITH_LIBRARY_VERSIONING "ON")
 
-set(RAW_VERSION_STRING "2.3.0")
+set(RAW_VERSION_STRING "2.4.1")
 if(EXISTS "${CMAKE_SOURCE_DIR}/.source_tag")
 	file(READ ${CMAKE_SOURCE_DIR}/.source_tag RAW_VERSION_STRING)
 elseif(USE_VERSION_FROM_GIT_TAG)
@@ -705,7 +709,7 @@ set(FFMPEG_FEATURE_DESCRIPTION "multimedia redirection, audio and video playback
 
 set(VAAPI_FEATURE_TYPE "OPTIONAL")
 set(VAAPI_FEATURE_PURPOSE "multimedia")
-set(VAAPI_FEATURE_DESCRIPTION "VA-API hardware acceleration for video playback")
+set(VAAPI_FEATURE_DESCRIPTION "[experimental] VA-API hardware acceleration for video playback")
 
 set(IPP_FEATURE_TYPE "OPTIONAL")
 set(IPP_FEATURE_PURPOSE "performance")
@@ -725,7 +729,7 @@ set(OPENH264_FEATURE_DESCRIPTION "use OpenH264 library")
 
 set(OPENCL_FEATURE_TYPE "OPTIONAL")
 set(OPENCL_FEATURE_PURPOSE "codec")
-set(OPENCL_FEATURE_DESCRIPTION "use OpenCL library")
+set(OPENCL_FEATURE_DESCRIPTION "[experimental] use OpenCL library")
 
 set(GSM_FEATURE_TYPE "OPTIONAL")
 set(GSM_FEATURE_PURPOSE "codec")
@@ -741,7 +745,7 @@ set(FAAD2_FEATURE_DESCRIPTION "FAAD2 AAC audio codec library")
 
 set(FAAC_FEATURE_TYPE "OPTIONAL")
 set(FAAC_FEATURE_PURPOSE "codec")
-set(FAAC_FEATURE_DESCRIPTION "FAAC AAC audio codec library")
+set(FAAC_FEATURE_DESCRIPTION "[experimental] FAAC AAC audio codec library")
 
 set(SOXR_FEATURE_TYPE "OPTIONAL")
 set(SOXR_FEATURE_PURPOSE "codec")
@@ -749,7 +753,7 @@ set(SOXR_FEATURE_DESCRIPTION "SOX audio resample library")
 
 set(GSSAPI_FEATURE_TYPE "OPTIONAL")
 set(GSSAPI_FEATURE_PURPOSE "auth")
-set(GSSAPI_FEATURE_DESCRIPTION "add kerberos support")
+set(GSSAPI_FEATURE_DESCRIPTION "[experimental] add kerberos support")
 
 if(WIN32)
 	set(X11_FEATURE_TYPE "DISABLED")

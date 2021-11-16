@@ -725,11 +725,13 @@ char* crypto_cert_get_upn(X509* x509)
 	return result;
 }
 
+#if !defined(DEFINE_NO_DEPRECATED)
 /* Deprecated name.*/
 void crypto_cert_subject_alt_name_free(int count, int* lengths, char** alt_names)
 {
 	crypto_cert_dns_names_free(count, lengths, alt_names);
 }
+#endif
 
 void crypto_cert_dns_names_free(int count, int* lengths, char** dns_names)
 {
@@ -751,11 +753,13 @@ void crypto_cert_dns_names_free(int count, int* lengths, char** dns_names)
 	}
 }
 
+#if !defined(DEFINE_NO_DEPRECATED)
 /* Deprecated name.*/
 char** crypto_cert_subject_alt_name(X509* xcert, int* count, int** lengths)
 {
 	return crypto_cert_get_dns_names(xcert, count, lengths);
 }
+#endif
 
 char** crypto_cert_get_dns_names(X509* x509, int* count, int** lengths)
 {
@@ -842,9 +846,7 @@ BOOL x509_verify_certificate(CryptoCert cert, const char* certificate_store_path
 	                    NULL);
 #endif
 
-	lookup = X509_STORE_add_lookup(cert_ctx, X509_LOOKUP_file());
-
-	if (lookup == NULL)
+	if (X509_STORE_set_default_paths(cert_ctx) != 1)
 		goto end;
 
 	lookup = X509_STORE_add_lookup(cert_ctx, X509_LOOKUP_hash_dir());

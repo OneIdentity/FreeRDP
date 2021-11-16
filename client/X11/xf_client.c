@@ -1401,11 +1401,8 @@ static DWORD WINAPI xf_input_thread(LPVOID arg)
 	DWORD status;
 	DWORD nCount;
 	HANDLE events[3];
-	XEvent xevent;
 	wMessage msg;
 	wMessageQueue* queue;
-	int pending_status = 1;
-	int process_status = 1;
 	freerdp* instance = (freerdp*)arg;
 	xfContext* xfc = (xfContext*)instance->context;
 	queue = freerdp_get_message_queue(instance, FREERDP_INPUT_MESSAGE_QUEUE);
@@ -1434,26 +1431,7 @@ static DWORD WINAPI xf_input_thread(LPVOID arg)
 
 				if (WaitForSingleObject(events[1], 0) == WAIT_OBJECT_0)
 				{
-					do
-					{
-						xf_lock_x11(xfc);
-						pending_status = XPending(xfc->display);
-						xf_unlock_x11(xfc);
-
-						if (pending_status)
-						{
-							xf_lock_x11(xfc);
-							ZeroMemory(&xevent, sizeof(xevent));
-							XNextEvent(xfc->display, &xevent);
-							process_status = xf_event_process(instance, &xevent);
-							xf_unlock_x11(xfc);
-
-							if (!process_status)
-								break;
-						}
-					} while (pending_status);
-
-					if (!process_status)
+					if (!xf_process_x_events(xfc->context.instance))
 					{
 						running = FALSE;
 						break;
@@ -1472,6 +1450,7 @@ static DWORD WINAPI xf_input_thread(LPVOID arg)
 	}
 
 	MessageQueue_PostQuit(queue, 0);
+	freerdp_abort_connect(xfc->context.instance);
 	ExitThread(0);
 	return 0;
 }
@@ -1533,6 +1512,84 @@ static DWORD WINAPI xf_client_thread(LPVOID param)
 		else if (freerdp_get_last_error(instance->context) ==
 		         FREERDP_ERROR_SECURITY_NEGO_CONNECT_FAILED)
 			exit_code = XF_EXIT_NEGO_FAILURE;
+ 		else if (freerdp_get_last_error(instance->context) ==
+ 				 FREERDP_ERROR_CONNECT_LOGON_FAILURE)
+ 			exit_code = XF_EXIT_LOGON_FAILURE;
+ 		else if (freerdp_get_last_error(instance->context) ==
+ 				 FREERDP_ERROR_CONNECT_ACCOUNT_LOCKED_OUT)
+ 			exit_code = XF_EXIT_ACCOUNT_LOCKED_OUT;
+ 		else if (freerdp_get_last_error(instance->context) ==
+ 				 FREERDP_ERROR_PRE_CONNECT_FAILED)
+ 			exit_code = XF_EXIT_PRE_CONNECT_FAILED;
+ 		else if (freerdp_get_last_error(instance->context) ==
+ 				 FREERDP_ERROR_CONNECT_UNDEFINED)
+ 			exit_code = XF_EXIT_CONNECT_UNDEFINED;
+ 		else if (freerdp_get_last_error(instance->context) ==
+ 				 FREERDP_ERROR_POST_CONNECT_FAILED)
+ 			exit_code = XF_EXIT_POST_CONNECT_FAILED;
+ 		else if (freerdp_get_last_error(instance->context) ==
+ 				 FREERDP_ERROR_DNS_ERROR)
+ 			exit_code = XF_EXIT_DNS_ERROR;
+ 		else if (freerdp_get_last_error(instance->context) ==
+ 				 FREERDP_ERROR_DNS_NAME_NOT_FOUND)
+ 			exit_code = XF_EXIT_DNS_NAME_NOT_FOUND;
+ 		else if (freerdp_get_last_error(instance->context) ==
+ 				 FREERDP_ERROR_CONNECT_FAILED)
+ 			exit_code = XF_EXIT_CONNECT_FAILED;
+ 		else if (freerdp_get_last_error(instance->context) ==
+ 				 FREERDP_ERROR_MCS_CONNECT_INITIAL_ERROR)
+ 			exit_code = XF_EXIT_MCS_CONNECT_INITIAL_ERROR;
+ 		else if (freerdp_get_last_error(instance->context) ==
+ 				 FREERDP_ERROR_TLS_CONNECT_FAILED)
+ 			exit_code = XF_EXIT_TLS_CONNECT_FAILED;
+ 		else if (freerdp_get_last_error(instance->context) ==
+ 				 FREERDP_ERROR_INSUFFICIENT_PRIVILEGES)
+ 			exit_code = XF_EXIT_INSUFFICIENT_PRIVILEGES;
+ 		else if (freerdp_get_last_error(instance->context) ==
+ 				 FREERDP_ERROR_CONNECT_CANCELLED)
+ 			exit_code = XF_EXIT_CONNECT_CANCELLED;
+ 		else if (freerdp_get_last_error(instance->context) ==
+ 				 FREERDP_ERROR_SECURITY_NEGO_CONNECT_FAILED)
+ 			exit_code = XF_EXIT_SECURITY_NEGO_CONNECT_FAILED;
+ 		else if (freerdp_get_last_error(instance->context) ==
+ 				 FREERDP_ERROR_CONNECT_TRANSPORT_FAILED)
+ 			exit_code = XF_EXIT_CONNECT_TRANSPORT_FAILED;
+ 		else if (freerdp_get_last_error(instance->context) ==
+ 				 FREERDP_ERROR_CONNECT_PASSWORD_EXPIRED)
+ 			exit_code = XF_EXIT_CONNECT_PASSWORD_EXPIRED;
+ 		else if (freerdp_get_last_error(instance->context) ==
+ 				 FREERDP_ERROR_CONNECT_PASSWORD_MUST_CHANGE)
+ 			exit_code = XF_EXIT_CONNECT_PASSWORD_MUST_CHANGE;
+ 		else if (freerdp_get_last_error(instance->context) ==
+ 				 FREERDP_ERROR_CONNECT_KDC_UNREACHABLE)
+ 			exit_code = XF_EXIT_CONNECT_KDC_UNREACHABLE;
+ 		else if (freerdp_get_last_error(instance->context) ==
+ 				 FREERDP_ERROR_CONNECT_ACCOUNT_DISABLED)
+ 			exit_code = XF_EXIT_CONNECT_ACCOUNT_DISABLED;
+ 		else if (freerdp_get_last_error(instance->context) ==
+ 				 FREERDP_ERROR_CONNECT_PASSWORD_CERTAINLY_EXPIRED)
+ 			exit_code = XF_EXIT_CONNECT_PASSWORD_CERTAINLY_EXPIRED;
+ 		else if (freerdp_get_last_error(instance->context) ==
+ 				 FREERDP_ERROR_CONNECT_CLIENT_REVOKED)
+ 			exit_code = XF_EXIT_CONNECT_CLIENT_REVOKED;
+ 		else if (freerdp_get_last_error(instance->context) ==
+ 				 FREERDP_ERROR_CONNECT_WRONG_PASSWORD)
+ 			exit_code = XF_EXIT_CONNECT_WRONG_PASSWORD;
+ 		else if (freerdp_get_last_error(instance->context) ==
+ 				 FREERDP_ERROR_CONNECT_ACCESS_DENIED)
+ 			exit_code = XF_EXIT_CONNECT_ACCESS_DENIED;
+ 		else if (freerdp_get_last_error(instance->context) ==
+ 				 FREERDP_ERROR_CONNECT_ACCOUNT_RESTRICTION)
+ 			exit_code = XF_EXIT_CONNECT_ACCOUNT_RESTRICTION;
+ 		else if (freerdp_get_last_error(instance->context) ==
+ 				 FREERDP_ERROR_CONNECT_ACCOUNT_EXPIRED)
+ 			exit_code = XF_EXIT_CONNECT_ACCOUNT_EXPIRED;
+ 		else if (freerdp_get_last_error(instance->context) ==
+ 				 FREERDP_ERROR_CONNECT_LOGON_TYPE_NOT_GRANTED)
+ 			exit_code = XF_EXIT_CONNECT_LOGON_TYPE_NOT_GRANTED;
+ 		else if (freerdp_get_last_error(instance->context) ==
+ 				 FREERDP_ERROR_CONNECT_NO_OR_MISSING_CREDENTIALS)
+ 			exit_code = XF_EXIT_CONNECT_NO_OR_MISSING_CREDENTIALS;
 		else
 			exit_code = XF_EXIT_CONN_FAILED;
 	}
@@ -1697,7 +1754,7 @@ end:
 
 DWORD xf_exit_code_from_disconnect_reason(DWORD reason)
 {
-	if (reason == 0 || (reason >= XF_EXIT_PARSE_ARGUMENTS && reason <= XF_EXIT_NEGO_FAILURE))
+	if (reason == 0 || (reason >= XF_EXIT_PARSE_ARGUMENTS && reason <= XF_EXIT_CONNECT_NO_OR_MISSING_CREDENTIALS))
 		return reason;
 	/* License error set */
 	else if (reason >= 0x100 && reason <= 0x10A)

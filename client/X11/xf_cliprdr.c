@@ -1034,7 +1034,8 @@ static BOOL xf_cliprdr_process_selection_request(xfClipboard* clipboard,
 
 	if (!delayRespond)
 	{
-		union {
+		union
+		{
 			XEvent* ev;
 			XSelectionEvent* sev;
 		} conv;
@@ -1423,7 +1424,10 @@ static UINT xf_cliprdr_server_format_list(CliprdrClientContext* context,
 	}
 
 	ret = xf_cliprdr_send_client_format_list_response(clipboard, TRUE);
-	xf_cliprdr_prepare_to_set_selection_owner(xfc, clipboard);
+	if (xfc->remote_app)
+		xf_cliprdr_set_selection_owner(xfc, clipboard, CurrentTime);
+	else
+		xf_cliprdr_prepare_to_set_selection_owner(xfc, clipboard);
 	return ret;
 }
 
@@ -1611,7 +1615,8 @@ xf_cliprdr_server_format_data_response(CliprdrClientContext* context,
 
 	xf_cliprdr_provide_data(clipboard, clipboard->respond, pDstData, DstSize);
 	{
-		union {
+		union
+		{
 			XEvent* ev;
 			XSelectionEvent* sev;
 		} conv;

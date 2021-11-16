@@ -1,3 +1,86 @@
+# 20xx-xx-xx Version 2.x.x
+
+Noteworthy changes:
+* Fixed smartcard login in case a redirection occurs the pin was lost
+
+Fixed issues:
+
+Important notes:
+
+For a complete and detailed change log since the last release run:
+git log 2.4.1..2.x.x
+
+# 2021-10-20 Version 2.4.1
+
+Noteworthy changes:
+* Refactored RPC gateway parsing code
+* OpenSSL 3.0 compatibility fixes
+* USB redirection: fixed transfer lengths
+
+Fixed issues:
+* #7363: Length checks in ConvertUTF8toUTF16
+* #7349: Added checks for bitmap width and heigth values
+
+Important notes:
+* CVE-2021-41159: Improper client input validation for gateway connections allows to overwrite memory
+* CVE-2021-41160: Improper region checks in all clients allow out of bound write to memory
+
+For a complete and detailed change log since the last release run:
+git log 2.4.0..2.4.1
+
+# 2021-07-27 Version 2.4.0
+
+Noteworthy changes:
+* Backported multithreadded progressive decoder (#7036)
+* Backported clipboard fixes (#6924)
+* Fixed remote file read (#7185)
+
+Fixed issues:
+* #6938: RAILS clipboard remote -> local
+* #6985: Support newer FFMPEG builds
+* #6989: Use OpenSSL default certificate store settings
+* #7073: Planar alignment fixes
+
+# 2021-03-15 Version 2.3.2
+
+For a complete and detailed change log since the last release run:
+git log 2.3.2..2.4.0
+
+Noteworthy changes:
+* Fixed autoreconnect printer backend loading
+* Fixed compilation on older mac os versions < 10.14
+* Fixed mouse pointer move with smart-sizing
+* Added command line option to disable websocket gateway support
+* Fixed drive hotplugging issues with windows
+* Fixed smartcard issues on mac
+
+Fixed issues:
+* #6900: Transparency issues with aFreeRDP
+* #6848: Invalid format string in smartcard trace
+* #6846: Fixed static builds
+* #6888: Crash due to missing bounds checks
+* #6882: Use default sound devoce on mac
+
+For a complete and detailed change log since the last release run:
+git log 2.3.1..2.3.2
+
+# 2021-03-01 Version 2.3.1
+
+Noteworthy changes:
+* This is a compatibility bugfix release readding some (deprecated)
+  symbols/defines
+* Also add some more EXPERIMENTAL warnings to CMake flags as some were not
+  clear enough.
+* Fixed a memory leak in xfreerdp (mouse pointer updates)
+* No longer activating some compile time debug options with -DWITH_DEBUG_ALL=ON
+  which might leak sensitive information.
+* Added -DDEFINE_NO_DEPRECATED for developers to detect use of deprecated
+  symbols
+
+For a complete and detailed change log since the last release run:
+git log 2.3.0..2.3.1
+
+
 # 2021-02-24 Version 2.3.0
 
 Important notes:

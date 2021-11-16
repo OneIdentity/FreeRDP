@@ -42,6 +42,27 @@ static BOOL is_rect_valid(const RECTANGLE_16* rect, size_t width, size_t height)
 	return TRUE;
 }
 
+static BOOL is_within_surface(const gdiGfxSurface* surface, const RDPGFX_SURFACE_COMMAND* cmd)
+{
+	RECTANGLE_16 rect;
+	if (!surface || !cmd)
+		return FALSE;
+	rect.left = cmd->left;
+	rect.top = cmd->top;
+	rect.right = cmd->right;
+	rect.bottom = cmd->bottom;
+	if (!is_rect_valid(&rect, surface->width, surface->height))
+	{
+		WLog_ERR(TAG,
+		         "%s: Command rect %" PRIu32 "x" PRIu32 "-" PRIu32 "x" PRIu32
+		         " not within bounds of " PRIu32 "x" PRIu32,
+		         __FUNCTION__, rect.left, rect.top, cmd->width, cmd->height, surface->width,
+		         surface->height);
+		return FALSE;
+	}
+	return TRUE;
+}
+
 static DWORD gfx_align_scanline(DWORD widthInBytes, DWORD alignment)
 {
 	const UINT32 align = alignment;
@@ -259,6 +280,9 @@ static UINT gdi_SurfaceCommand_Uncompressed(rdpGdi* gdi, RdpgfxClientContext* co
 		return ERROR_NOT_FOUND;
 	}
 
+	if (!is_within_surface(surface, cmd))
+		return ERROR_INVALID_DATA;
+
 	if (!freerdp_image_copy(surface->data, surface->format, surface->scanline, cmd->left, cmd->top,
 	                        cmd->width, cmd->height, cmd->data, cmd->format, 0, 0, 0, NULL,
 	                        FREERDP_FLIP_NONE))
@@ -413,6 +437,9 @@ static UINT gdi_SurfaceCommand_Planar(rdpGdi* gdi, RdpgfxClientContext* context,
 	}
 
 	DstData = surface->data;
+
+	if (!is_within_surface(surface, cmd))
+		return ERROR_INVALID_DATA;
 
 	if (!planar_decompress(surface->codecs->planar, cmd->data, cmd->length, cmd->width, cmd->height,
 	                       DstData, surface->format, surface->scanline, cmd->left, cmd->top,
@@ -686,6 +713,9 @@ static UINT gdi_SurfaceCommand_Alpha(rdpGdi* gdi, RdpgfxClientContext* context,
 		return ERROR_NOT_FOUND;
 	}
 
+	if (!is_within_surface(surface, cmd))
+		return ERROR_INVALID_DATA;
+
 	Stream_Read_UINT16(&s, alphaSig);
 	Stream_Read_UINT16(&s, compressed);
 
@@ -696,7 +726,7 @@ static UINT gdi_SurfaceCommand_Alpha(rdpGdi* gdi, RdpgfxClientContext* context,
 	{
 		UINT32 x, y;
 
-		if (Stream_GetRemainingLength(&s) < cmd->height * cmd->width)
+		if (Stream_GetRemainingLength(&s) < cmd->height * cmd->width * 1ULL)
 			return ERROR_INVALID_DATA;
 
 		for (y = cmd->top; y < cmd->top + cmd->height; y++)
@@ -814,6 +844,9 @@ static UINT gdi_SurfaceCommand_Progressive(rdpGdi* gdi, RdpgfxClientContext* con
 		         cmd->surfaceId);
 		return ERROR_NOT_FOUND;
 	}
+
+	if (!is_within_surface(surface, cmd))
+		return ERROR_INVALID_DATA;
 
 	rc = progressive_create_surface_context(surface->codecs->progressive, cmd->surfaceId,
 	                                        surface->width, surface->height);
@@ -991,8 +1024,8 @@ static UINT gdi_CreateSurface(RdpgfxClientContext* context,
 			goto fail;
 	}
 
-	surface->scanline = gfx_align_scanline(surface->width * 4, 16);
-	surface->data = (BYTE*)_aligned_malloc(surface->scanline * surface->height, 16);
+	surface->scanline = gfx_align_scanline(surface->width * 4UL, 16);
+	surface->data = (BYTE*)_aligned_malloc(surface->scanline * surface->height * 1ULL, 16);
 
 	if (!surface->data)
 	{
@@ -1502,6 +1535,7 @@ BOOL gdi_graphics_pipeline_init_ex(rdpGdi* gdi, RdpgfxClientContext* gfx,
 	InitializeCriticalSection(&gfx->mux);
 	PROFILER_CREATE(gfx->SurfaceProfiler, "GFX-PROFILER");
 
+#if !defined(DEFINE_NO_DEPRECATED)
 	/**
 	 * gdi->graphicsReset will be removed in FreeRDP v3 from public headers,
 	 * since the EGFX Reset Graphics PDU seems to be optional.
@@ -1509,6 +1543,7 @@ BOOL gdi_graphics_pipeline_init_ex(rdpGdi* gdi, RdpgfxClientContext* gfx,
 	 * we simply initialize it with TRUE here for now.
 	 */
 	gdi->graphicsReset = TRUE;
+#endif
 
 	return TRUE;
 }

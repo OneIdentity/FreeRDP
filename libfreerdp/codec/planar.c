@@ -33,6 +33,8 @@
 
 #define TAG FREERDP_TAG("codec")
 
+#define ALIGN(val, align) ((val) % (align) == 0) ? (val) : ((val) + (align) - (val) % (align))
+
 static INLINE UINT32 planar_invert_format(BITMAP_PLANAR_CONTEXT* planar, BOOL alpha,
                                           UINT32 DstFormat)
 {
@@ -508,7 +510,7 @@ static INLINE BOOL writeLine(BYTE** ppRgba, UINT32 DstFormat, UINT32 width, cons
 static INLINE BOOL planar_decompress_planes_raw(const BYTE* pSrcData[4], BYTE* pDstData,
                                                 UINT32 DstFormat, UINT32 nDstStep, UINT32 nXDst,
                                                 UINT32 nYDst, UINT32 nWidth, UINT32 nHeight,
-                                                BOOL vFlip)
+                                                BOOL vFlip, UINT32 totalHeight)
 {
 	INT32 y;
 	INT32 beg, end, inc;
@@ -516,6 +518,7 @@ static INLINE BOOL planar_decompress_planes_raw(const BYTE* pSrcData[4], BYTE* p
 	const BYTE* pG = pSrcData[1];
 	const BYTE* pB = pSrcData[2];
 	const BYTE* pA = pSrcData[3];
+	const UINT32 bpp = GetBytesPerPixel(DstFormat);
 
 	if (vFlip)
 	{
@@ -530,9 +533,20 @@ static INLINE BOOL planar_decompress_planes_raw(const BYTE* pSrcData[4], BYTE* p
 		inc = 1;
 	}
 
+	if (nYDst + nHeight > totalHeight)
+		return FALSE;
+
+	if ((nXDst + nWidth) * bpp > nDstStep)
+		return FALSE;
+
 	for (y = beg; y != end; y += inc)
 	{
-		BYTE* pRGB = &pDstData[((nYDst + y) * nDstStep) + (nXDst * GetBytesPerPixel(DstFormat))];
+		BYTE* pRGB;
+
+		if (y > (INT64)nHeight)
+			return FALSE;
+
+		pRGB = &pDstData[((nYDst + y) * nDstStep) + (nXDst * bpp)];
 
 		if (!writeLine(&pRGB, DstFormat, nWidth, &pR, &pG, &pB, &pA))
 			return FALSE;
@@ -739,6 +753,7 @@ BOOL planar_decompress(BITMAP_PLANAR_CONTEXT* planar, const BYTE* pSrcData, UINT
 		UINT32 TempFormat;
 		BYTE* pTempData = pDstData;
 		UINT32 nTempStep = nDstStep;
+		UINT32 nTotalHeight = nYDst + nDstHeight;
 
 		if (useAlpha)
 			TempFormat = PIXEL_FORMAT_BGRA32;
@@ -749,12 +764,13 @@ BOOL planar_decompress(BITMAP_PLANAR_CONTEXT* planar, const BYTE* pSrcData, UINT
 		{
 			pTempData = planar->pTempData;
 			nTempStep = planar->nTempStep;
+			nTotalHeight = planar->maxHeight;
 		}
 
 		if (!rle) /* RAW */
 		{
 			if (!planar_decompress_planes_raw(planes, pTempData, TempFormat, nTempStep, nXDst,
-			                                  nYDst, nSrcWidth, nSrcHeight, vFlip))
+			                                  nYDst, nSrcWidth, nSrcHeight, vFlip, nTotalHeight))
 				return FALSE;
 
 			if (alpha)
@@ -819,6 +835,7 @@ BOOL planar_decompress(BITMAP_PLANAR_CONTEXT* planar, const BYTE* pSrcData, UINT
 		UINT32 TempFormat;
 		BYTE* pTempData = planar->pTempData;
 		UINT32 nTempStep = planar->nTempStep;
+		UINT32 nTotalHeight = planar->maxHeight;
 
 		if (useAlpha)
 			TempFormat = PIXEL_FORMAT_BGRA32;
@@ -901,7 +918,7 @@ BOOL planar_decompress(BITMAP_PLANAR_CONTEXT* planar, const BYTE* pSrcData, UINT
 			}
 
 			if (!planar_decompress_planes_raw(planes, pTempData, TempFormat, nTempStep, nXDst,
-			                                  nYDst, nSrcWidth, nSrcHeight, vFlip))
+			                                  nYDst, nSrcWidth, nSrcHeight, vFlip, nTotalHeight))
 				return FALSE;
 
 			if (alpha)
@@ -1467,8 +1484,8 @@ BOOL freerdp_bitmap_planar_context_reset(BITMAP_PLANAR_CONTEXT* context, UINT32 
 		return FALSE;
 
 	context->bgr = FALSE;
-	context->maxWidth = width;
-	context->maxHeight = height;
+	context->maxWidth = ALIGN(width, 4);
+	context->maxHeight = ALIGN(height, 4);
 	context->maxPlaneSize = context->maxWidth * context->maxHeight;
 	context->nTempStep = context->maxWidth * 4;
 	free(context->planesBuffer);
