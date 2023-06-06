@@ -27,6 +27,7 @@
 #endif
 
 #include <assert.h>
+#include <winpr/sspicli.h>
 #include <float.h>
 
 #include <X11/Xlib.h>
@@ -814,8 +815,6 @@ void xf_lock_x11_(xfContext* xfc, const char* fkt)
 	else
 		XLockDisplay(xfc->display);
 
-	if (xfc->locked)
-		WLog_WARN(TAG, "%s:\t[%" PRIu32 "] recursive lock from %s", __FUNCTION__, xfc->locked, fkt);
 	xfc->locked++;
 	WLog_VRB(TAG, "%s:\t[%" PRIu32 "] from %s", __FUNCTION__, xfc->locked, fkt);
 }
@@ -1183,20 +1182,12 @@ static BOOL xf_pre_connect(freerdp* instance)
 
 	if (!settings->Username && !settings->CredentialsFromStdin && !settings->SmartcardLogon)
 	{
-		int rc;
 		char login_name[MAX_PATH] = { 0 };
+		ULONG size = sizeof(login_name) - 1;
 
-#ifdef HAVE_GETLOGIN_R
-		rc = getlogin_r(login_name, sizeof(login_name));
-#else
-		strncpy(login_name, getlogin(), sizeof(login_name));
-		rc = 0;
-#endif
-		if (rc == 0)
+		if (GetUserNameExA(NameSamCompatible, login_name, &size))
 		{
-			settings->Username = _strdup(login_name);
-
-			if (!settings->Username)
+			if (!freerdp_settings_set_string(settings, FreeRDP_Username, login_name))
 				return FALSE;
 
 			WLog_INFO(TAG, "No user name set. - Using login name: %s", settings->Username);
@@ -1263,6 +1254,7 @@ static BOOL xf_post_connect(freerdp* instance)
 	context = instance->context;
 	settings = instance->settings;
 	update = context->update;
+	BOOL serverIsWindowsPlatform;
 
 	if (!gdi_init(instance, xf_get_local_color_format(xfc, TRUE)))
 		return FALSE;
@@ -1332,7 +1324,8 @@ static BOOL xf_post_connect(freerdp* instance)
 	update->SetKeyboardIndicators = xf_keyboard_set_indicators;
 	update->SetKeyboardImeStatus = xf_keyboard_set_ime_status;
 
-	if (!(xfc->clipboard = xf_clipboard_new(xfc)))
+	serverIsWindowsPlatform = (settings->OsMajorType == OSMAJORTYPE_WINDOWS);
+	if (!(xfc->clipboard = xf_clipboard_new(xfc, !serverIsWindowsPlatform)))
 		return FALSE;
 
 	if (!(xfc->xfDisp = xf_disp_new(xfc)))
@@ -1391,7 +1384,10 @@ static int xf_logon_error_info(freerdp* instance, UINT32 data, UINT32 type)
 	const char* str_data = freerdp_get_logon_error_info_data(data);
 	const char* str_type = freerdp_get_logon_error_info_type(type);
 	WLog_INFO(TAG, "Logon Error Info %s [%s]", str_data, str_type);
-	xf_rail_disable_remoteapp_mode(xfc);
+	if(type != LOGON_MSG_SESSION_CONTINUE)
+	{
+	    xf_rail_disable_remoteapp_mode(xfc);
+	}
 	return 1;
 }
 
@@ -1468,7 +1464,7 @@ static BOOL handle_window_events(freerdp* instance)
 	{
 		if (!xf_process_x_events(instance))
 		{
-			WLog_INFO(TAG, "Closed from X11");
+			WLog_DBG(TAG, "Closed from X11");
 			return FALSE;
 		}
 	}
