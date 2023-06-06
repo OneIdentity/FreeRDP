@@ -37,6 +37,7 @@
 #define PROTOCOL_HYBRID 0x00000002
 #define PROTOCOL_RDSTLS 0x00000004
 #define PROTOCOL_HYBRID_EX 0x00000008
+#define PROTOCOL_RDSAAD 0x00000010
 
 #define PROTOCOL_FAILED_NEGO 0x80000000 /* only used internally, not on the wire */
 
@@ -55,17 +56,18 @@ enum RDP_NEG_FAILURE_FAILURECODES
 #define AUTHZ_SUCCESS 0x00000000
 #define AUTHZ_ACCESS_DENIED 0x0000052E
 
-enum _NEGO_STATE
+typedef enum
 {
 	NEGO_STATE_INITIAL,
-	NEGO_STATE_EXT,  /* Extended NLA (NLA + TLS implicit) */
-	NEGO_STATE_NLA,  /* Network Level Authentication (TLS implicit) */
-	NEGO_STATE_TLS,  /* TLS Encryption without NLA */
-	NEGO_STATE_RDP,  /* Standard Legacy RDP Encryption */
-	NEGO_STATE_FAIL, /* Negotiation failure */
+	NEGO_STATE_RDSTLS, /* RDSTLS (TLS implicit) */
+	NEGO_STATE_AAD,    /* Azure AD Authentication (TLS implicit) */
+	NEGO_STATE_EXT,    /* Extended NLA (NLA + TLS implicit) */
+	NEGO_STATE_NLA,    /* Network Level Authentication (TLS implicit) */
+	NEGO_STATE_TLS,    /* TLS Encryption without NLA */
+	NEGO_STATE_RDP,    /* Standard Legacy RDP Encryption */
+	NEGO_STATE_FAIL,   /* Negotiation failure */
 	NEGO_STATE_FINAL
-};
-typedef enum _NEGO_STATE NEGO_STATE;
+} NEGO_STATE;
 
 /* RDP Negotiation Messages */
 enum RDP_NEG_MSG
@@ -74,13 +76,18 @@ enum RDP_NEG_MSG
 	TYPE_RDP_NEG_REQ = 0x1,
 	/* X224_TPDU_CONNECTION_CONFIRM */
 	TYPE_RDP_NEG_RSP = 0x2,
-	TYPE_RDP_NEG_FAILURE = 0x3
+	TYPE_RDP_NEG_FAILURE = 0x3,
+	TYPE_RDP_CORRELATION_INFO = 0x6
 };
 
-#define EXTENDED_CLIENT_DATA_SUPPORTED 0x01
-#define DYNVC_GFX_PROTOCOL_SUPPORTED 0x02
-#define RDP_NEGRSP_RESERVED 0x04
-#define RESTRICTED_ADMIN_MODE_SUPPORTED 0x08
+typedef enum
+{
+	EXTENDED_CLIENT_DATA_SUPPORTED = 0x01,
+	DYNVC_GFX_PROTOCOL_SUPPORTED = 0x02,
+	RDP_NEGRSP_RESERVED = 0x04,
+	RESTRICTED_ADMIN_MODE_SUPPORTED = 0x08,
+	REDIRECTED_AUTHENTICATION_MODE_SUPPORTED = 0x10
+} RdpNegRespFlags;
 
 #define PRECONNECTION_PDU_V1_SIZE 16
 #define PRECONNECTION_PDU_V2_MIN_SIZE (PRECONNECTION_PDU_V1_SIZE + 2)
@@ -116,6 +123,8 @@ FREERDP_LOCAL void nego_set_gateway_bypass_local(rdpNego* nego, BOOL GatewayBypa
 FREERDP_LOCAL void nego_enable_rdp(rdpNego* nego, BOOL enable_rdp);
 FREERDP_LOCAL void nego_enable_tls(rdpNego* nego, BOOL enable_tls);
 FREERDP_LOCAL void nego_enable_nla(rdpNego* nego, BOOL enable_nla);
+FREERDP_LOCAL void nego_enable_rdstls(rdpNego* nego, BOOL enable_rdstls);
+FREERDP_LOCAL void nego_enable_aad(rdpNego* nego, BOOL enable_aad);
 FREERDP_LOCAL void nego_enable_ext(rdpNego* nego, BOOL enable_ext);
 FREERDP_LOCAL const BYTE* nego_get_routing_token(rdpNego* nego, DWORD* RoutingTokenLength);
 FREERDP_LOCAL BOOL nego_set_routing_token(rdpNego* nego, const BYTE* RoutingToken,

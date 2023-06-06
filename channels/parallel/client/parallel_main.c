@@ -20,17 +20,11 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#ifdef HAVE_UNISTD_H
-#include <unistd.h>
-#endif
 
 #include <fcntl.h>
 #include <errno.h>
@@ -55,13 +49,14 @@
 #include <winpr/interlocked.h>
 
 #include <freerdp/types.h>
+#include <freerdp/freerdp.h>
 #include <freerdp/constants.h>
 #include <freerdp/channels/rdpdr.h>
 #include <freerdp/channels/log.h>
 
 #define TAG CHANNELS_TAG("drive.client")
 
-struct _PARALLEL_DEVICE
+typedef struct
 {
 	DEVICE device;
 
@@ -72,8 +67,7 @@ struct _PARALLEL_DEVICE
 	HANDLE thread;
 	wMessageQueue* queue;
 	rdpContext* rdpcontext;
-};
-typedef struct _PARALLEL_DEVICE PARALLEL_DEVICE;
+} PARALLEL_DEVICE;
 
 /**
  * Function description
@@ -83,27 +77,23 @@ typedef struct _PARALLEL_DEVICE PARALLEL_DEVICE;
 static UINT parallel_process_irp_create(PARALLEL_DEVICE* parallel, IRP* irp)
 {
 	char* path = NULL;
-	int status;
 	WCHAR* ptr;
 	UINT32 PathLength;
 	if (!Stream_SafeSeek(irp->input, 28))
 		return ERROR_INVALID_DATA;
 	/* DesiredAccess(4) AllocationSize(8), FileAttributes(4) */
 	/* SharedAccess(4) CreateDisposition(4), CreateOptions(4) */
-	if (Stream_GetRemainingLength(irp->input) < 4)
+	if (!Stream_CheckAndLogRequiredLength(TAG, irp->input, 4))
 		return ERROR_INVALID_DATA;
 	Stream_Read_UINT32(irp->input, PathLength);
+	if (PathLength < sizeof(WCHAR))
+		return ERROR_INVALID_DATA;
 	ptr = (WCHAR*)Stream_Pointer(irp->input);
 	if (!Stream_SafeSeek(irp->input, PathLength))
 		return ERROR_INVALID_DATA;
-	status = ConvertFromUnicode(CP_UTF8, 0, ptr, PathLength / 2, &path, 0, NULL, NULL);
-
-	if (status < 1)
-		if (!(path = (char*)calloc(1, 1)))
-		{
-			WLog_ERR(TAG, "calloc failed!");
-			return CHANNEL_RC_NO_MEMORY;
-		}
+	path = ConvertWCharNToUtf8Alloc(ptr, PathLength / sizeof(WCHAR), NULL);
+	if (!path)
+		return CHANNEL_RC_NO_MEMORY;
 
 	parallel->id = irp->devman->id_sequence++;
 	parallel->file = open(parallel->path, O_RDWR);
@@ -156,11 +146,11 @@ static UINT parallel_process_irp_read(PARALLEL_DEVICE* parallel, IRP* irp)
 	UINT64 Offset;
 	ssize_t status;
 	BYTE* buffer = NULL;
-	if (Stream_GetRemainingLength(irp->input) < 12)
+	if (!Stream_CheckAndLogRequiredLength(TAG, irp->input, 12))
 		return ERROR_INVALID_DATA;
 	Stream_Read_UINT32(irp->input, Length);
 	Stream_Read_UINT64(irp->input, Offset);
-	buffer = (BYTE*)malloc(Length);
+	buffer = (BYTE*)calloc(Length, sizeof(BYTE));
 
 	if (!buffer)
 	{
@@ -179,6 +169,7 @@ static UINT parallel_process_irp_read(PARALLEL_DEVICE* parallel, IRP* irp)
 	}
 	else
 	{
+		Length = status;
 	}
 
 	Stream_Write_UINT32(irp->output, Length);
@@ -211,7 +202,7 @@ static UINT parallel_process_irp_write(PARALLEL_DEVICE* parallel, IRP* irp)
 	UINT64 Offset;
 	ssize_t status;
 	void* ptr;
-	if (Stream_GetRemainingLength(irp->input) > 12)
+	if (!Stream_CheckAndLogRequiredLength(TAG, irp->input, 12))
 		return ERROR_INVALID_DATA;
 
 	Stream_Read_UINT32(irp->input, Length);
@@ -314,7 +305,6 @@ static UINT parallel_process_irp(PARALLEL_DEVICE* parallel, IRP* irp)
 		default:
 			irp->IoStatus = STATUS_NOT_SUPPORTED;
 			return irp->Complete(irp);
-			break;
 	}
 
 	return CHANNEL_RC_OK;
@@ -405,18 +395,27 @@ static UINT parallel_free(DEVICE* device)
 	return CHANNEL_RC_OK;
 }
 
-#ifdef BUILTIN_CHANNELS
-#define DeviceServiceEntry parallel_DeviceServiceEntry
-#else
-#define DeviceServiceEntry FREERDP_API DeviceServiceEntry
-#endif
+static void parallel_message_free(void* obj)
+{
+	wMessage* msg = obj;
+	if (!msg)
+		return;
+	if (msg->id != 0)
+		return;
+
+	IRP* irp = (IRP*)msg->wParam;
+	if (!irp)
+		return;
+	WINPR_ASSERT(irp->Discard);
+	irp->Discard(irp);
+}
 
 /**
  * Function description
  *
  * @return 0 on success, otherwise a Win32 error code
  */
-UINT DeviceServiceEntry(PDEVICE_SERVICE_ENTRY_POINTS pEntryPoints)
+UINT parallel_DeviceServiceEntry(PDEVICE_SERVICE_ENTRY_POINTS pEntryPoints)
 {
 	char* name;
 	char* path;
@@ -477,6 +476,10 @@ UINT DeviceServiceEntry(PDEVICE_SERVICE_ENTRY_POINTS pEntryPoints)
 			error = CHANNEL_RC_NO_MEMORY;
 			goto error_out;
 		}
+
+		wObject* obj = MessageQueue_Object(parallel->queue);
+		WINPR_ASSERT(obj);
+		obj->fnObjectFree = parallel_message_free;
 
 		if ((error = pEntryPoints->RegisterDevice(pEntryPoints->devman, (DEVICE*)parallel)))
 		{

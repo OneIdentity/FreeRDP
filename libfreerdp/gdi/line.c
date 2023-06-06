@@ -19,9 +19,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -37,17 +35,9 @@
 #include "clipping.h"
 #include "line.h"
 
-/**
- * Draw a line from the current position to the given position.\n
- * @msdn{dd145029}
- * @param hdc device context
- * @param nXEnd ending x position
- * @param nYEnd ending y position
- * @return nonzero if successful, 0 otherwise
- */
 static BOOL gdi_rop_color(UINT32 rop, BYTE* pixelPtr, UINT32 pen, UINT32 format)
 {
-	const UINT32 srcPixel = ReadColor(pixelPtr, format);
+	const UINT32 srcPixel = FreeRDPReadColor(pixelPtr, format);
 	UINT32 dstPixel;
 
 	switch (rop)
@@ -120,7 +110,7 @@ static BOOL gdi_rop_color(UINT32 rop, BYTE* pixelPtr, UINT32 pen, UINT32 format)
 			return FALSE;
 	}
 
-	return WriteColor(pixelPtr, format, dstPixel);
+	return FreeRDPWriteColor(pixelPtr, format, dstPixel);
 }
 
 BOOL gdi_LineTo(HGDI_DC hdc, UINT32 nXEnd, UINT32 nYEnd)

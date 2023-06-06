@@ -17,9 +17,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <winpr/config.h>
 
 #ifdef _WIN32
 #define SEC_ENTRY __stdcall
@@ -40,6 +38,8 @@ typedef LONG SECURITY_STATUS;
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmissing-prototypes"
 #endif
+
+#ifdef SSPI_DLL
 
 /**
  * Standard SSPI API
@@ -283,6 +283,22 @@ SSPI_EXPORT SECURITY_STATUS SEC_ENTRY SetContextAttributesA(void* phContext, ULO
 	return sspi_SetContextAttributesA(phContext, ulAttribute, pBuffer, cbBuffer);
 }
 
+extern SECURITY_STATUS SEC_ENTRY sspi_SetCredentialsAttributesW(void*, ULONG, void*, ULONG);
+
+static SECURITY_STATUS SEC_ENTRY SetCredentialsAttributesW(void* phCredential, ULONG ulAttribute,
+                                                           void* pBuffer, ULONG cbBuffer)
+{
+	return sspi_SetCredentialsAttributesW(phCredential, ulAttribute, pBuffer, cbBuffer);
+}
+
+extern SECURITY_STATUS SEC_ENTRY sspi_SetCredentialsAttributesA(void*, ULONG, void*, ULONG);
+
+static SECURITY_STATUS SEC_ENTRY SetCredentialsAttributesA(void* phCredential, ULONG ulAttribute,
+                                                           void* pBuffer, ULONG cbBuffer)
+{
+	return sspi_SetCredentialsAttributesA(phCredential, ulAttribute, pBuffer, cbBuffer);
+}
+
 extern SECURITY_STATUS SEC_ENTRY sspi_RevertSecurityContext(void*);
 
 SSPI_EXPORT SECURITY_STATUS SEC_ENTRY RevertSecurityContext(void* phContext)
@@ -323,6 +339,8 @@ SSPI_EXPORT SECURITY_STATUS SEC_ENTRY VerifySignature(void* phContext, void* pMe
 {
 	return sspi_VerifySignature(phContext, pMessage, MessageSeqNo, pfQOP);
 }
+
+#endif /* SSPI_DLL */
 
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop

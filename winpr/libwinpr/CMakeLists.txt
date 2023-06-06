@@ -23,6 +23,9 @@ set(WINPR_LIBS_PRIVATE "")
 set(WINPR_LIBS_PUBLIC "")
 set(WINPR_INCLUDES "")
 set(WINPR_DEFINITIONS "")
+set(WINPR_COMPILE_OPTIONS "")
+set(WINPR_LINK_OPTIONS "")
+set(WINPR_LINK_DIRS "")
 
 macro (winpr_module_add)
     file (RELATIVE_PATH _relPath "${WINPR_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -77,6 +80,27 @@ macro (winpr_definition_add)
      set (WINPR_DEFINITIONS ${WINPR_DEFINITIONS} PARENT_SCOPE)
 endmacro()
 
+macro (winpr_library_add_compile_options)
+    foreach (_define ${ARGN})
+	    list (APPEND WINPR_COMPILE_OPTIONS "${_define}")
+    endforeach()
+    set (WINPR_COMPILE_OPTIONS ${WINPR_COMPILE_OPTIONS} PARENT_SCOPE)
+endmacro()
+
+macro (winpr_library_add_link_options)
+    foreach (_define ${ARGN})
+	    list (APPEND WINPR_LINK_OPTIONS "${_define}")
+    endforeach()
+    set (WINPR_LINK_OPTIONS ${WINPR_LINK_OPTIONS} PARENT_SCOPE)
+endmacro()
+
+macro (winpr_library_add_link_directory)
+    foreach (_define ${ARGN})
+	    list (APPEND WINPR_LINK_DIRS "${_define}")
+    endforeach()
+    set (WINPR_LINK_DIRS ${WINPR_LINK_DIRS} PARENT_SCOPE)
+endmacro()
+
 set(CMAKE_REQUIRED_LIBRARIES rt)
 
 if(NOT IOS)
@@ -96,16 +120,16 @@ endif()
 
 # Level "1" API as defined for MinCore.lib
 set(WINPR_CORE synch library file comm pipe interlocked security
-	environment crypto registry credentials path io memory input shell
-	heap utils error timezone sysinfo pool handle thread)
+	environment crypto registry path io memory ncrypt input shell
+	utils error timezone sysinfo pool handle thread)
 
 foreach(DIR ${WINPR_CORE})
 	add_subdirectory(${DIR})
 	source_group("${DIR}" REGULAR_EXPRESSION "${DIR}/.*\\.[ch]")
 endforeach()
 
-set(WINPR_LEVEL2 winsock sspi winhttp sspicli crt bcrypt rpc credui
-	wtsapi dsparse wnd smartcard nt clipboard)
+set(WINPR_LEVEL2 winsock sspi sspicli crt bcrypt rpc
+	wtsapi dsparse smartcard nt clipboard)
 
 foreach(DIR ${WINPR_LEVEL2})
 	add_subdirectory(${DIR})
@@ -114,10 +138,12 @@ endforeach()
 
 set(MODULE_NAME winpr)
 list(REMOVE_DUPLICATES WINPR_DEFINITIONS)
+list(REMOVE_DUPLICATES WINPR_COMPILE_OPTIONS)
+list(REMOVE_DUPLICATES WINPR_LINK_OPTIONS)
+list(REMOVE_DUPLICATES WINPR_LINK_DIRS)
 list(REMOVE_DUPLICATES WINPR_LIBS_PRIVATE)
 list(REMOVE_DUPLICATES WINPR_LIBS_PUBLIC)
 list(REMOVE_DUPLICATES WINPR_INCLUDES)
-include_directories(${WINPR_INCLUDES})
 
 # On windows create dll version information.
 # Vendor, product and year are already set in top level CMakeLists.txt
@@ -137,13 +163,26 @@ if (WIN32)
 endif()
 
 add_library(${MODULE_NAME} ${WINPR_SRCS})
+if (APPLE)
+    set_target_properties(${MODULE_NAME} PROPERTIES INTERPROCEDURAL_OPTIMIZATION FALSE)
+endif()
 set_target_properties(${MODULE_NAME} PROPERTIES LINKER_LANGUAGE C)
 set_target_properties(${MODULE_NAME} PROPERTIES OUTPUT_NAME ${MODULE_NAME}${WINPR_API_VERSION})
 if (WITH_LIBRARY_VERSIONING)
     set_target_properties(${MODULE_NAME} PROPERTIES VERSION ${WINPR_VERSION} SOVERSION ${WINPR_API_VERSION})
 endif()
 
-add_definitions(${WINPR_DEFINITIONS})
+if (NOT BUILD_SHARED_LIBS)
+    set(LINK_OPTS_MODE PUBLIC)
+else()
+    set(LINK_OPTS_MODE PRIVATE)
+endif()
+target_link_options(${MODULE_NAME} ${LINK_OPTS_MODE} ${WINPR_LINK_OPTIONS})
+target_include_directories(${MODULE_NAME} PRIVATE ${WINPR_INCLUDES})
+target_link_directories(${MODULE_NAME} PRIVATE ${WINPR_LINK_DIRS})
+target_compile_options(${MODULE_NAME} PRIVATE ${WINPR_COMPILE_OPTIONS})
+target_compile_definitions(${MODULE_NAME} PRIVATE ${WINPR_DEFINITIONS})
+
 target_link_libraries(${MODULE_NAME} PRIVATE ${WINPR_LIBS_PRIVATE} PUBLIC ${WINPR_LIBS_PUBLIC})
 install(TARGETS ${MODULE_NAME} COMPONENT libraries EXPORT WinPRTargets
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}

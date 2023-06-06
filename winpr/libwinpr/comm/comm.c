@@ -20,9 +20,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <winpr/config.h>
 
 #if defined __linux__ && !defined ANDROID
 
@@ -114,7 +112,7 @@ static void _CommInit(void)
  * Returns TRUE when the comm module is correctly intialized, FALSE otherwise
  * with ERROR_DLL_INIT_FAILED set as the last error.
  */
-static BOOL CommInitialized()
+static BOOL CommInitialized(void)
 {
 	if (pthread_once(&_CommInitialized, _CommInit) != 0)
 	{
@@ -142,7 +140,7 @@ BOOL BuildCommDCBA(LPCSTR lpDef, LPDCB lpDCB)
 		return FALSE;
 
 	/* TODO: not implemented */
-	CommLog_Print(WLOG_ERROR, "%s: Not implemented", __FUNCTION__);
+	CommLog_Print(WLOG_ERROR, "Not implemented");
 	SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
 	return FALSE;
 }
@@ -153,7 +151,7 @@ BOOL BuildCommDCBW(LPCWSTR lpDef, LPDCB lpDCB)
 		return FALSE;
 
 	/* TODO: not implemented */
-	CommLog_Print(WLOG_ERROR, "%s: Not implemented", __FUNCTION__);
+	CommLog_Print(WLOG_ERROR, "Not implemented");
 	SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
 	return FALSE;
 }
@@ -164,7 +162,7 @@ BOOL BuildCommDCBAndTimeoutsA(LPCSTR lpDef, LPDCB lpDCB, LPCOMMTIMEOUTS lpCommTi
 		return FALSE;
 
 	/* TODO: not implemented */
-	CommLog_Print(WLOG_ERROR, "%s: Not implemented", __FUNCTION__);
+	CommLog_Print(WLOG_ERROR, "Not implemented");
 	SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
 	return FALSE;
 }
@@ -175,7 +173,7 @@ BOOL BuildCommDCBAndTimeoutsW(LPCWSTR lpDef, LPDCB lpDCB, LPCOMMTIMEOUTS lpCommT
 		return FALSE;
 
 	/* TODO: not implemented */
-	CommLog_Print(WLOG_ERROR, "%s: Not implemented", __FUNCTION__);
+	CommLog_Print(WLOG_ERROR, "Not implemented");
 	SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
 	return FALSE;
 }
@@ -186,7 +184,7 @@ BOOL CommConfigDialogA(LPCSTR lpszName, HWND hWnd, LPCOMMCONFIG lpCC)
 		return FALSE;
 
 	/* TODO: not implemented */
-	CommLog_Print(WLOG_ERROR, "%s: Not implemented", __FUNCTION__);
+	CommLog_Print(WLOG_ERROR, "Not implemented");
 	SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
 	return FALSE;
 }
@@ -197,7 +195,7 @@ BOOL CommConfigDialogW(LPCWSTR lpszName, HWND hWnd, LPCOMMCONFIG lpCC)
 		return FALSE;
 
 	/* TODO: not implemented */
-	CommLog_Print(WLOG_ERROR, "%s: Not implemented", __FUNCTION__);
+	CommLog_Print(WLOG_ERROR, "Not implemented");
 	SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
 	return FALSE;
 }
@@ -214,7 +212,7 @@ BOOL GetCommConfig(HANDLE hCommDev, LPCOMMCONFIG lpCC, LPDWORD lpdwSize)
 	if (!pComm)
 		return FALSE;
 
-	CommLog_Print(WLOG_ERROR, "%s: Not implemented", __FUNCTION__);
+	CommLog_Print(WLOG_ERROR, "Not implemented");
 	SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
 	return FALSE;
 }
@@ -231,7 +229,7 @@ BOOL SetCommConfig(HANDLE hCommDev, LPCOMMCONFIG lpCC, DWORD dwSize)
 	if (!pComm)
 		return FALSE;
 
-	CommLog_Print(WLOG_ERROR, "%s: Not implemented", __FUNCTION__);
+	CommLog_Print(WLOG_ERROR, "Not implemented");
 	SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
 	return FALSE;
 }
@@ -248,7 +246,7 @@ BOOL GetCommMask(HANDLE hFile, PDWORD lpEvtMask)
 	if (!pComm)
 		return FALSE;
 
-	CommLog_Print(WLOG_ERROR, "%s: Not implemented", __FUNCTION__);
+	CommLog_Print(WLOG_ERROR, "Not implemented");
 	SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
 	return FALSE;
 }
@@ -265,7 +263,7 @@ BOOL SetCommMask(HANDLE hFile, DWORD dwEvtMask)
 	if (!pComm)
 		return FALSE;
 
-	CommLog_Print(WLOG_ERROR, "%s: Not implemented", __FUNCTION__);
+	CommLog_Print(WLOG_ERROR, "Not implemented");
 	SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
 	return FALSE;
 }
@@ -282,7 +280,7 @@ BOOL GetCommModemStatus(HANDLE hFile, PDWORD lpModemStat)
 	if (!pComm)
 		return FALSE;
 
-	CommLog_Print(WLOG_ERROR, "%s: Not implemented", __FUNCTION__);
+	CommLog_Print(WLOG_ERROR, "Not implemented");
 	SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
 	return FALSE;
 }
@@ -297,14 +295,8 @@ BOOL GetCommProperties(HANDLE hFile, LPCOMMPROP lpCommProp)
 	WINPR_COMM* pComm = (WINPR_COMM*)hFile;
 	DWORD bytesReturned;
 
-	if (!CommInitialized())
+	if (!CommIsHandleValid(hFile))
 		return FALSE;
-
-	if (!pComm || pComm->Type != HANDLE_TYPE_COMM || !pComm->fd)
-	{
-		SetLastError(ERROR_INVALID_HANDLE);
-		return FALSE;
-	}
 
 	if (!CommDeviceIoControl(pComm, IOCTL_SERIAL_GET_PROPERTIES, NULL, 0, lpCommProp,
 	                         sizeof(COMMPROP), &bytesReturned, NULL))
@@ -332,14 +324,8 @@ BOOL GetCommState(HANDLE hFile, LPDCB lpDCB)
 	WINPR_COMM* pComm = (WINPR_COMM*)hFile;
 	DWORD bytesReturned;
 
-	if (!CommInitialized())
+	if (!CommIsHandleValid(hFile))
 		return FALSE;
-
-	if (!pComm || pComm->Type != HANDLE_TYPE_COMM || !pComm->fd)
-	{
-		SetLastError(ERROR_INVALID_HANDLE);
-		return FALSE;
-	}
 
 	if (!lpDCB)
 	{
@@ -486,20 +472,14 @@ error_handle:
  */
 BOOL SetCommState(HANDLE hFile, LPDCB lpDCB)
 {
-	struct termios upcomingTermios;
+	struct termios upcomingTermios = { 0 };
 	WINPR_COMM* pComm = (WINPR_COMM*)hFile;
 	DWORD bytesReturned;
 
 	/* FIXME: validate changes according GetCommProperties? */
 
-	if (!CommInitialized())
+	if (!CommIsHandleValid(hFile))
 		return FALSE;
-
-	if (!pComm || pComm->Type != HANDLE_TYPE_COMM || !pComm->fd)
-	{
-		SetLastError(ERROR_INVALID_HANDLE);
-		return FALSE;
-	}
 
 	if (!lpDCB)
 	{
@@ -555,8 +535,7 @@ BOOL SetCommState(HANDLE hFile, LPDCB lpDCB)
 		return FALSE;
 	}
 
-	SERIAL_HANDFLOW handflow;
-	ZeroMemory(&handflow, sizeof(SERIAL_HANDFLOW));
+	SERIAL_HANDFLOW handflow = { 0 };
 
 	if (lpDCB->fOutxCtsFlow)
 	{
@@ -661,7 +640,6 @@ BOOL SetCommState(HANDLE hFile, LPDCB lpDCB)
 	}
 
 	/** upcomingTermios stage **/
-	ZeroMemory(&upcomingTermios, sizeof(struct termios));
 
 	if (tcgetattr(pComm->fd, &upcomingTermios) <
 	    0) /* NB: preserves current settings not directly handled by the Communication Functions */
@@ -718,14 +696,8 @@ BOOL GetCommTimeouts(HANDLE hFile, LPCOMMTIMEOUTS lpCommTimeouts)
 	WINPR_COMM* pComm = (WINPR_COMM*)hFile;
 	DWORD bytesReturned;
 
-	if (!CommInitialized())
+	if (!CommIsHandleValid(hFile))
 		return FALSE;
-
-	if (!pComm || pComm->Type != HANDLE_TYPE_COMM || !pComm->fd)
-	{
-		SetLastError(ERROR_INVALID_HANDLE);
-		return FALSE;
-	}
 
 	/* as of today, SERIAL_TIMEOUTS and COMMTIMEOUTS structures are identical */
 
@@ -748,14 +720,8 @@ BOOL SetCommTimeouts(HANDLE hFile, LPCOMMTIMEOUTS lpCommTimeouts)
 	WINPR_COMM* pComm = (WINPR_COMM*)hFile;
 	DWORD bytesReturned;
 
-	if (!CommInitialized())
+	if (!CommIsHandleValid(hFile))
 		return FALSE;
-
-	if (!pComm || pComm->Type != HANDLE_TYPE_COMM || !pComm->fd)
-	{
-		SetLastError(ERROR_INVALID_HANDLE);
-		return FALSE;
-	}
 
 	/* as of today, SERIAL_TIMEOUTS and COMMTIMEOUTS structures are identical */
 
@@ -775,7 +741,7 @@ BOOL GetDefaultCommConfigA(LPCSTR lpszName, LPCOMMCONFIG lpCC, LPDWORD lpdwSize)
 		return FALSE;
 
 	/* TODO: not implemented */
-	CommLog_Print(WLOG_ERROR, "%s: Not implemented", __FUNCTION__);
+	CommLog_Print(WLOG_ERROR, "Not implemented");
 	SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
 	return FALSE;
 }
@@ -786,7 +752,7 @@ BOOL GetDefaultCommConfigW(LPCWSTR lpszName, LPCOMMCONFIG lpCC, LPDWORD lpdwSize
 		return FALSE;
 
 	/* TODO: not implemented */
-	CommLog_Print(WLOG_ERROR, "%s: Not implemented", __FUNCTION__);
+	CommLog_Print(WLOG_ERROR, "Not implemented");
 	SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
 	return FALSE;
 }
@@ -797,7 +763,7 @@ BOOL SetDefaultCommConfigA(LPCSTR lpszName, LPCOMMCONFIG lpCC, DWORD dwSize)
 		return FALSE;
 
 	/* TODO: not implemented */
-	CommLog_Print(WLOG_ERROR, "%s: Not implemented", __FUNCTION__);
+	CommLog_Print(WLOG_ERROR, "Not implemented");
 	SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
 	return FALSE;
 }
@@ -808,7 +774,7 @@ BOOL SetDefaultCommConfigW(LPCWSTR lpszName, LPCOMMCONFIG lpCC, DWORD dwSize)
 		return FALSE;
 
 	/* TODO: not implemented */
-	CommLog_Print(WLOG_ERROR, "%s: Not implemented", __FUNCTION__);
+	CommLog_Print(WLOG_ERROR, "Not implemented");
 	SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
 	return FALSE;
 }
@@ -825,7 +791,7 @@ BOOL SetCommBreak(HANDLE hFile)
 	if (!pComm)
 		return FALSE;
 
-	CommLog_Print(WLOG_ERROR, "%s: Not implemented", __FUNCTION__);
+	CommLog_Print(WLOG_ERROR, "Not implemented");
 	SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
 	return FALSE;
 }
@@ -842,7 +808,7 @@ BOOL ClearCommBreak(HANDLE hFile)
 	if (!pComm)
 		return FALSE;
 
-	CommLog_Print(WLOG_ERROR, "%s: Not implemented", __FUNCTION__);
+	CommLog_Print(WLOG_ERROR, "Not implemented");
 	SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
 	return FALSE;
 }
@@ -859,7 +825,7 @@ BOOL ClearCommError(HANDLE hFile, PDWORD lpErrors, LPCOMSTAT lpStat)
 	if (!pComm)
 		return FALSE;
 
-	CommLog_Print(WLOG_ERROR, "%s: Not implemented", __FUNCTION__);
+	CommLog_Print(WLOG_ERROR, "Not implemented");
 	SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
 	return FALSE;
 }
@@ -869,14 +835,8 @@ BOOL PurgeComm(HANDLE hFile, DWORD dwFlags)
 	WINPR_COMM* pComm = (WINPR_COMM*)hFile;
 	DWORD bytesReturned = 0;
 
-	if (!CommInitialized())
+	if (!CommIsHandleValid(hFile))
 		return FALSE;
-
-	if (!pComm || pComm->Type != HANDLE_TYPE_COMM || !pComm->fd)
-	{
-		SetLastError(ERROR_INVALID_HANDLE);
-		return FALSE;
-	}
 
 	if (!CommDeviceIoControl(pComm, IOCTL_SERIAL_PURGE, &dwFlags, sizeof(DWORD), NULL, 0,
 	                         &bytesReturned, NULL))
@@ -894,14 +854,8 @@ BOOL SetupComm(HANDLE hFile, DWORD dwInQueue, DWORD dwOutQueue)
 	SERIAL_QUEUE_SIZE queueSize;
 	DWORD bytesReturned = 0;
 
-	if (!CommInitialized())
+	if (!CommIsHandleValid(hFile))
 		return FALSE;
-
-	if (!pComm || pComm->Type != HANDLE_TYPE_COMM || !pComm->fd)
-	{
-		SetLastError(ERROR_INVALID_HANDLE);
-		return FALSE;
-	}
 
 	queueSize.InSize = dwInQueue;
 	queueSize.OutSize = dwOutQueue;
@@ -928,7 +882,7 @@ BOOL EscapeCommFunction(HANDLE hFile, DWORD dwFunc)
 	if (!pComm)
 		return FALSE;
 
-	CommLog_Print(WLOG_ERROR, "%s: Not implemented", __FUNCTION__);
+	CommLog_Print(WLOG_ERROR, "Not implemented");
 	SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
 	return FALSE;
 }
@@ -945,7 +899,7 @@ BOOL TransmitCommChar(HANDLE hFile, char cChar)
 	if (!pComm)
 		return FALSE;
 
-	CommLog_Print(WLOG_ERROR, "%s: Not implemented", __FUNCTION__);
+	CommLog_Print(WLOG_ERROR, "Not implemented");
 	SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
 	return FALSE;
 }
@@ -962,7 +916,7 @@ BOOL WaitCommEvent(HANDLE hFile, PDWORD lpEvtMask, LPOVERLAPPED lpOverlapped)
 	if (!pComm)
 		return FALSE;
 
-	CommLog_Print(WLOG_ERROR, "%s: Not implemented", __FUNCTION__);
+	CommLog_Print(WLOG_ERROR, "Not implemented");
 	SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
 	return FALSE;
 }
@@ -1179,12 +1133,13 @@ static HANDLE_OPS ops = { CommIsHandled, CommCloseHandle,
 	                      NULL,          NULL,
 	                      NULL,          NULL,
 	                      NULL,          NULL,
-	                      NULL,          NULL };
+	                      NULL,          NULL,
+	                      NULL };
 
 /**
  * http://msdn.microsoft.com/en-us/library/windows/desktop/aa363198%28v=vs.85%29.aspx
  *
- * @param lpDeviceName e.g. COM1, "\\.\COM1", ...
+ * @param lpDeviceName e.g. COM1, ...
  *
  * @param dwDesiredAccess expects GENERIC_READ | GENERIC_WRITE, a
  * warning message is printed otherwise. TODO: better support.
@@ -1286,7 +1241,7 @@ HANDLE CommCreateFileA(LPCSTR lpDeviceName, DWORD dwDesiredAccess, DWORD dwShare
 	}
 
 	WINPR_HANDLE_SET_TYPE_AND_MODE(pComm, HANDLE_TYPE_COMM, WINPR_FD_READ);
-	pComm->ops = &ops;
+	pComm->common.ops = &ops;
 	/* error_handle */
 	pComm->fd = open(devicePath, O_RDWR | O_NOCTTY | O_NONBLOCK);
 
@@ -1394,36 +1349,31 @@ error_handle:
 
 BOOL CommIsHandled(HANDLE handle)
 {
-	WINPR_COMM* pComm;
-
 	if (!CommInitialized())
 		return FALSE;
 
-	pComm = (WINPR_COMM*)handle;
+	return WINPR_HANDLE_IS_HANDLED(handle, HANDLE_TYPE_COMM, TRUE);
+}
 
-	if (!pComm || (pComm->Type != HANDLE_TYPE_COMM) || (pComm == INVALID_HANDLE_VALUE))
+BOOL CommIsHandleValid(HANDLE handle)
+{
+	WINPR_COMM* pComm = (WINPR_COMM*)handle;
+	if (!CommIsHandled(handle))
+		return FALSE;
+	if (pComm->fd <= 0)
 	{
 		SetLastError(ERROR_INVALID_HANDLE);
 		return FALSE;
 	}
-
 	return TRUE;
 }
 
 BOOL CommCloseHandle(HANDLE handle)
 {
-	WINPR_COMM* pComm;
+	WINPR_COMM* pComm = (WINPR_COMM*)handle;
 
-	if (!CommInitialized())
+	if (!CommIsHandled(handle))
 		return FALSE;
-
-	pComm = (WINPR_COMM*)handle;
-
-	if (!pComm || pComm->Type != HANDLE_TYPE_COMM)
-	{
-		SetLastError(ERROR_INVALID_HANDLE);
-		return FALSE;
-	}
 
 	if (pComm->PendingEvents & SERIAL_EV_WINPR_WAITING)
 	{

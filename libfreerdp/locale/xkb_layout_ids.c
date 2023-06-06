@@ -17,9 +17,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include "xkb_layout_ids.h"
 
@@ -31,20 +29,18 @@
 
 #include "liblocale.h"
 
-struct _XKB_VARIANT
+typedef struct
 {
 	const char* variant;     /* XKB Keyboard layout variant */
 	UINT32 keyboardLayoutID; /* Keyboard Layout ID */
-};
-typedef struct _XKB_VARIANT XKB_VARIANT;
+} XKB_VARIANT;
 
-struct _XKB_LAYOUT
+typedef struct
 {
 	const char* layout;      /* XKB Keyboard layout */
 	UINT32 keyboardLayoutID; /* Keyboard Layout ID */
 	const XKB_VARIANT* variants;
-};
-typedef struct _XKB_LAYOUT XKB_LAYOUT;
+} XKB_LAYOUT;
 
 /* Those have been generated automatically and are waiting to be filled by hand */
 
@@ -797,7 +793,7 @@ static const XKB_LAYOUT xkbLayouts[] = {
 	{ "mt", KBD_MALTESE_48_KEY, mt_variants },                   /* Malta */
 	{ "mn", KBD_MONGOLIAN_CYRILLIC, NULL },                      /* Mongolia */
 	{ "no", KBD_NORWEGIAN, no_variants },                        /* Norway */
-	{ "pl", KBD_POLISH_214, pl_variants },                       /* Poland */
+	{ "pl", KBD_POLISH_PROGRAMMERS, pl_variants },               /* Poland */
 	{ "pt", KBD_PORTUGUESE, pt_variants },                       /* Portugal */
 	{ "ro", KBD_ROMANIAN, ro_variants },                         /* Romania */
 	{ "ru", KBD_RUSSIAN, ru_variants },                          /* Russia */

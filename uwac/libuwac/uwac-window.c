@@ -26,12 +26,13 @@
 #include <unistd.h>
 #include <assert.h>
 #include <sys/mman.h>
+#include <errno.h>
 
 #include "uwac-priv.h"
 #include "uwac-utils.h"
 #include "uwac-os.h"
 
-#include "config.h"
+#include <uwac/config.h>
 
 #define UWAC_INITIAL_BUFFERS 3
 
@@ -48,7 +49,8 @@ static int bppFromShmFormat(enum wl_shm_format format)
 
 static void buffer_release(void* data, struct wl_buffer* buffer)
 {
-	UwacBuffer* uwacBuffer = (UwacBuffer*)data;
+	UwacBufferReleaseData* releaseData = data;
+	UwacBuffer* uwacBuffer = &releaseData->window->buffers[releaseData->bufferIdx];
 	uwacBuffer->used = false;
 }
 
@@ -61,12 +63,15 @@ static void UwacWindowDestroyBuffers(UwacWindow* w)
 	for (i = 0; i < w->nbuffers; i++)
 	{
 		UwacBuffer* buffer = &w->buffers[i];
-#ifdef HAVE_PIXMAN_REGION
+#ifdef UWAC_HAVE_PIXMAN_REGION
 		pixman_region32_fini(&buffer->damage);
 #else
 		region16_uninit(&buffer->damage);
 #endif
+		UwacBufferReleaseData* releaseData =
+		    (UwacBufferReleaseData*)wl_buffer_get_user_data(buffer->wayland_buffer);
 		wl_buffer_destroy(buffer->wayland_buffer);
+		free(releaseData);
 		munmap(buffer->data, buffer->size);
 	}
 
@@ -123,7 +128,7 @@ static void xdg_handle_toplevel_configure(void* data, struct xdg_toplevel* xdg_t
 	event->window = window;
 	event->states = surfaceState;
 
-	if (width && height)
+	if ((width > 0 && height > 0) && (width != window->width || height != window->height))
 	{
 		event->width = width;
 		event->height = height;
@@ -344,17 +349,21 @@ int UwacWindowShmAllocBuffers(UwacWindow* w, int nbuffers, int allocSize, uint32
 
 	for (i = 0; i < nbuffers; i++)
 	{
-		UwacBuffer* buffer = &w->buffers[w->nbuffers + i];
-#ifdef HAVE_PIXMAN_REGION
+		int bufferIdx = w->nbuffers + i;
+		UwacBuffer* buffer = &w->buffers[bufferIdx];
+#ifdef UWAC_HAVE_PIXMAN_REGION
 		pixman_region32_init(&buffer->damage);
 #else
 		region16_init(&buffer->damage);
 #endif
-		buffer->data = data + (allocSize * i);
+		buffer->data = &((char*)data)[allocSize * i];
 		buffer->size = allocSize;
 		buffer->wayland_buffer =
 		    wl_shm_pool_create_buffer(pool, allocSize * i, width, height, w->stride, format);
-		wl_buffer_add_listener(buffer->wayland_buffer, &buffer_listener, buffer);
+		UwacBufferReleaseData* listener_data = xmalloc(sizeof(UwacBufferReleaseData));
+		listener_data->window = w;
+		listener_data->bufferIdx = bufferIdx;
+		wl_buffer_add_listener(buffer->wayland_buffer, &buffer_listener, listener_data);
 	}
 
 	wl_shm_pool_destroy(pool);
@@ -477,7 +486,40 @@ UwacWindow* UwacCreateWindowShm(UwacDisplay* display, uint32_t width, uint32_t h
 
 	wl_surface_set_user_data(w->surface, w);
 
-	if (display->xdg_base)
+#if BUILD_IVI
+	uint32_t ivi_surface_id = 1;
+	char* env = getenv("IVI_SURFACE_ID");
+	if (env)
+	{
+		unsigned long val;
+		char* endp;
+
+		errno = 0;
+		val = strtoul(env, &endp, 10);
+
+		if (!errno && val != 0 && val != UINT32_MAX)
+			ivi_surface_id = val;
+	}
+
+	if (display->ivi_application)
+	{
+		w->ivi_surface =
+		    ivi_application_surface_create(display->ivi_application, ivi_surface_id, w->surface);
+		assert(w->ivi_surface);
+		ivi_surface_add_listener(w->ivi_surface, &ivi_surface_listener, w);
+	}
+	else
+#endif
+#if BUILD_FULLSCREEN_SHELL
+	    if (display->fullscreen_shell)
+	{
+		zwp_fullscreen_shell_v1_present_surface(display->fullscreen_shell, w->surface,
+		                                        ZWP_FULLSCREEN_SHELL_V1_PRESENT_METHOD_CENTER,
+		                                        NULL);
+	}
+	else
+#endif
+	    if (display->xdg_base)
 	{
 		w->xdg_surface = xdg_wm_base_get_xdg_surface(display->xdg_base, w->surface);
 
@@ -501,22 +543,6 @@ UwacWindow* UwacCreateWindowShm(UwacDisplay* display, uint32_t width, uint32_t h
 		wl_surface_commit(w->surface);
 		wl_display_roundtrip(w->display->display);
 	}
-#if BUILD_IVI
-	else if (display->ivi_application)
-	{
-		w->ivi_surface = ivi_application_surface_create(display->ivi_application, 1, w->surface);
-		assert(w->ivi_surface);
-		ivi_surface_add_listener(w->ivi_surface, &ivi_surface_listener, w);
-	}
-#endif
-#if BUILD_FULLSCREEN_SHELL
-	else if (display->fullscreen_shell)
-	{
-		zwp_fullscreen_shell_v1_present_surface(display->fullscreen_shell, w->surface,
-		                                        ZWP_FULLSCREEN_SHELL_V1_PRESENT_METHOD_CENTER,
-		                                        NULL);
-	}
-#endif
 	else
 	{
 		w->shell_surface = wl_shell_get_shell_surface(display->shell, w->surface);
@@ -628,7 +654,7 @@ static void frame_done_cb(void* data, struct wl_callback* callback, uint32_t tim
 
 static const struct wl_callback_listener frame_listener = { frame_done_cb };
 
-#ifdef HAVE_PIXMAN_REGION
+#ifdef UWAC_HAVE_PIXMAN_REGION
 static void damage_surface(UwacWindow* window, UwacBuffer* buffer)
 {
 	int nrects, i;
@@ -679,7 +705,7 @@ static void frame_done_cb(void* data, struct wl_callback* callback, uint32_t tim
 		event->window = window;
 }
 
-#ifdef HAVE_PIXMAN_REGION
+#ifdef UWAC_HAVE_PIXMAN_REGION
 UwacReturnCode UwacWindowAddDamage(UwacWindow* window, uint32_t x, uint32_t y, uint32_t width,
                                    uint32_t height)
 {

@@ -1,4 +1,4 @@
-/**
+/*
  * FreeRDP: A Remote Desktop Protocol Implementation
  * RPC over HTTP
  *
@@ -19,9 +19,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <winpr/crt.h>
 #include <winpr/assert.h>
@@ -32,15 +30,13 @@
 
 #include <freerdp/log.h>
 
-#include <openssl/bio.h>
-
-#ifdef HAVE_VALGRIND_MEMCHECK_H
+#ifdef FREERDP_HAVE_VALGRIND_MEMCHECK_H
 #include <valgrind/memcheck.h>
 #endif
 
 #include "../proxy.h"
 #include "http.h"
-#include "ntlm.h"
+#include "../credssp_auth.h"
 #include "ncacn_http.h"
 #include "rpc_bind.h"
 #include "rpc_fault.h"
@@ -63,30 +59,30 @@ static const char* PTYPE_STRINGS[] = { "PTYPE_REQUEST",       "PTYPE_PING",
 	                                   "PTYPE_CO_CANCEL",     "PTYPE_ORPHANED",
 	                                   "PTYPE_RTS",           "" };
 
-/**
+/*
  * [MS-RPCH]: Remote Procedure Call over HTTP Protocol Specification:
  * http://msdn.microsoft.com/en-us/library/cc243950/
- */
-
-/**
- *                                      Connection Establishment\n
  *
- *     Client                  Outbound Proxy           Inbound Proxy                 Server\n
- *        |                         |                         |                         |\n
- *        |-----------------IN Channel Request--------------->|                         |\n
- *        |---OUT Channel Request-->|                         |<-Legacy Server Response-|\n
- *        |                         |<--------------Legacy Server Response--------------|\n
- *        |                         |                         |                         |\n
- *        |---------CONN_A1-------->|                         |                         |\n
- *        |----------------------CONN_B1--------------------->|                         |\n
- *        |                         |----------------------CONN_A2--------------------->|\n
- *        |                         |                         |                         |\n
- *        |<--OUT Channel Response--|                         |---------CONN_B2-------->|\n
- *        |<--------CONN_A3---------|                         |                         |\n
- *        |                         |<---------------------CONN_C1----------------------|\n
- *        |                         |                         |<--------CONN_B3---------|\n
- *        |<--------CONN_C2---------|                         |                         |\n
- *        |                         |                         |                         |\n
+ *
+ *
+ *                                      Connection Establishment
+ *
+ *     Client                  Outbound Proxy           Inbound Proxy                 Server
+ *        |                         |                         |                         |
+ *        |-----------------IN Channel Request--------------->|                         |
+ *        |---OUT Channel Request-->|                         |<-Legacy Server Response-|
+ *        |                         |<--------------Legacy Server Response--------------|
+ *        |                         |                         |                         |
+ *        |---------CONN_A1-------->|                         |                         |
+ *        |----------------------CONN_B1--------------------->|                         |
+ *        |                         |----------------------CONN_A2--------------------->|
+ *        |                         |                         |                         |
+ *        |<--OUT Channel Response--|                         |---------CONN_B2-------->|
+ *        |<--------CONN_A3---------|                         |                         |
+ *        |                         |<---------------------CONN_C1----------------------|
+ *        |                         |                         |<--------CONN_B3---------|
+ *        |<--------CONN_C2---------|                         |                         |
+ *        |                         |                         |                         |
  *
  */
 
@@ -172,7 +168,7 @@ size_t rpc_offset_pad(size_t* offset, size_t pad)
 	return pad;
 }
 
-/**
+/*
  * PDU Segments:
  *  ________________________________
  * |                                |
@@ -191,7 +187,7 @@ size_t rpc_offset_pad(size_t* offset, size_t pad)
  * |________________________________|
  */
 
-/**
+/*
  * PDU Structure with verification trailer
  *
  * MUST only appear in a request PDU!
@@ -222,7 +218,7 @@ size_t rpc_offset_pad(size_t* offset, size_t pad)
  *
  */
 
-/**
+/*
  * Security Trailer:
  *
  * The sec_trailer structure MUST be placed at the end of the PDU, including past stub data,
@@ -309,7 +305,7 @@ BOOL rpc_get_stub_data_info(const rpcconn_hdr_t* header, size_t* poffset, size_t
 
 	sec_trailer_offset = frag_length - auth_length - 8;
 
-	/**
+	/*
 	 * According to [MS-RPCE], auth_pad_length is the number of padding
 	 * octets used to 4-byte align the security trailer, but in practice
 	 * we get values up to 15, which indicates 16-byte alignment.
@@ -335,6 +331,7 @@ SSIZE_T rpc_channel_read(RpcChannel* channel, wStream* s, size_t length)
 	if (!channel || (length > INT32_MAX))
 		return -1;
 
+	ERR_clear_error();
 	status = BIO_read(channel->tls->bio, Stream_Pointer(s), (INT32)length);
 
 	if (status > 0)
@@ -357,7 +354,7 @@ SSIZE_T rpc_channel_write(RpcChannel* channel, const BYTE* data, size_t length)
 	if (!channel || (length > INT32_MAX))
 		return -1;
 
-	status = tls_write_all(channel->tls, data, (INT32)length);
+	status = freerdp_tls_write_all(channel->tls, data, (INT32)length);
 	return status;
 }
 
@@ -413,11 +410,11 @@ static int rpc_channel_rpch_init(RpcClient* client, RpcChannel* channel, const c
 		return -1;
 
 	settings = client->context->settings;
-	channel->ntlm = ntlm_new();
+	channel->auth = credssp_auth_new(client->context);
 	rts_generate_cookie((BYTE*)&channel->Cookie);
 	channel->client = client;
 
-	if (!channel->ntlm)
+	if (!channel->auth)
 		return -1;
 
 	channel->http = http_context_new();
@@ -473,9 +470,9 @@ void rpc_channel_free(RpcChannel* channel)
 	if (!channel)
 		return;
 
-	ntlm_free(channel->ntlm);
+	credssp_auth_free(channel->auth);
 	http_context_free(channel->http);
-	tls_free(channel->tls);
+	freerdp_tls_free(channel->tls);
 	free(channel);
 }
 
@@ -706,7 +703,7 @@ static BOOL rpc_channel_tls_connect(RpcChannel* channel, UINT32 timeout)
 	}
 
 	channel->bio = bufferedBio;
-	tls = channel->tls = tls_new(settings);
+	tls = channel->tls = freerdp_tls_new(settings);
 
 	if (!tls)
 		return FALSE;
@@ -714,7 +711,7 @@ static BOOL rpc_channel_tls_connect(RpcChannel* channel, UINT32 timeout)
 	tls->hostname = settings->GatewayHostname;
 	tls->port = settings->GatewayPort;
 	tls->isGatewayTransport = TRUE;
-	tlsStatus = tls_connect(tls, bufferedBio);
+	tlsStatus = freerdp_tls_connect(tls, bufferedBio);
 
 	if (tlsStatus < 1)
 	{
@@ -749,7 +746,7 @@ static int rpc_in_channel_connect(RpcInChannel* inChannel, UINT32 timeout)
 
 	rpc_in_channel_transition_to_state(inChannel, CLIENT_IN_CHANNEL_STATE_CONNECTED);
 
-	if (!rpc_ncacn_http_ntlm_init(context, &inChannel->common))
+	if (!rpc_ncacn_http_auth_init(context, &inChannel->common))
 		return -1;
 
 	/* Send IN Channel Request */
@@ -782,7 +779,7 @@ static int rpc_out_channel_connect(RpcOutChannel* outChannel, int timeout)
 
 	rpc_out_channel_transition_to_state(outChannel, CLIENT_OUT_CHANNEL_STATE_CONNECTED);
 
-	if (!rpc_ncacn_http_ntlm_init(context, &outChannel->common))
+	if (!rpc_ncacn_http_auth_init(context, &outChannel->common))
 		return FALSE;
 
 	/* Send OUT Channel Request */
@@ -813,7 +810,7 @@ int rpc_out_channel_replacement_connect(RpcOutChannel* outChannel, int timeout)
 
 	rpc_out_channel_transition_to_state(outChannel, CLIENT_OUT_CHANNEL_STATE_CONNECTED);
 
-	if (!rpc_ncacn_http_ntlm_init(context, (RpcChannel*)outChannel))
+	if (!rpc_ncacn_http_auth_init(context, (RpcChannel*)outChannel))
 		return FALSE;
 
 	/* Send OUT Channel Request */
@@ -867,9 +864,9 @@ rdpRpc* rpc_new(rdpTransport* transport)
 	rpc->State = RPC_CLIENT_STATE_INITIAL;
 	rpc->transport = transport;
 	rpc->SendSeqNum = 0;
-	rpc->ntlm = ntlm_new();
+	rpc->auth = credssp_auth_new(context);
 
-	if (!rpc->ntlm)
+	if (!rpc->auth)
 		goto out_free;
 
 	rpc->PipeCallId = 0;
@@ -906,7 +903,7 @@ void rpc_free(rdpRpc* rpc)
 	if (rpc)
 	{
 		rpc_client_free(rpc->client);
-		ntlm_free(rpc->ntlm);
+		credssp_auth_free(rpc->auth);
 		rpc_virtual_connection_free(rpc->VirtualConnection);
 		free(rpc);
 	}

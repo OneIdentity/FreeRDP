@@ -30,14 +30,12 @@
 #include <freerdp/api.h>
 
 #include <freerdp/freerdp.h>
-#include <freerdp/crypto/tls.h>
 #include <freerdp/types.h>
 #include <freerdp/settings.h>
 
 typedef struct rdp_rdg rdpRdg;
 
 #include "http.h"
-#include "ntlm.h"
 
 FREERDP_LOCAL rdpRdg* rdg_new(rdpContext* context);
 FREERDP_LOCAL void rdg_free(rdpRdg* rdg);

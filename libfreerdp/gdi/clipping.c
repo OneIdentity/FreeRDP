@@ -19,9 +19,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -40,8 +38,9 @@ BOOL gdi_SetClipRgn(HGDI_DC hdc, INT32 nXLeft, INT32 nYLeft, INT32 nWidth, INT32
 }
 
 /**
- * Get the current clipping region.\n
- * @msdn{dd144866}
+ * Get the current clipping region.
+ * msdn{dd144866}
+ *
  * @param hdc device context
  * @return clipping region
  */

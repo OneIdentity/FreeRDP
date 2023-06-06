@@ -30,7 +30,7 @@ HRESULT PATH_ALLOC_COMBINE(PCWSTR pszPathIn, PCWSTR pszMore, unsigned long dwFla
 	size_t pszMoreLength;
 	size_t pszPathInLength;
 	size_t pszPathOutLength;
-	WLog_WARN(TAG, "%s: has known bugs and needs fixing.", __FUNCTION__);
+	WLog_WARN(TAG, "has known bugs and needs fixing.");
 
 	if (!ppszPathOut)
 		return E_INVALIDARG;
@@ -61,7 +61,7 @@ HRESULT PATH_ALLOC_COMBINE(PCWSTR pszPathIn, PCWSTR pszMore, unsigned long dwFla
 			size_t sizeOfBuffer;
 			pszPathOutLength = 2 + pszMoreLength;
 			sizeOfBuffer = (pszPathOutLength + 1) * 2;
-			pszPathOut = (PWSTR)HeapAlloc(GetProcessHeap(), 0, sizeOfBuffer * 2);
+			pszPathOut = (PWSTR)calloc(sizeOfBuffer, 2);
 
 			if (!pszPathOut)
 				return E_OUTOFMEMORY;
@@ -76,7 +76,7 @@ HRESULT PATH_ALLOC_COMBINE(PCWSTR pszPathIn, PCWSTR pszMore, unsigned long dwFla
 		size_t sizeOfBuffer;
 		pszPathOutLength = pszPathInLength + pszMoreLength;
 		sizeOfBuffer = (pszPathOutLength + 1) * 2;
-		pszPathOut = (PWSTR)HeapAlloc(GetProcessHeap(), 0, sizeOfBuffer * 2);
+		pszPathOut = (PWSTR)calloc(sizeOfBuffer, 2);
 
 		if (!pszPathOut)
 			return E_OUTOFMEMORY;
@@ -105,7 +105,7 @@ HRESULT PATH_ALLOC_COMBINE(PCSTR pszPathIn, PCSTR pszMore, unsigned long dwFlags
 	int pszMoreLength;
 	int pszPathInLength;
 	int pszPathOutLength;
-	WLog_WARN(TAG, "%s: has known bugs and needs fixing.", __FUNCTION__);
+	WLog_WARN(TAG, "has known bugs and needs fixing.");
 
 	if (!ppszPathOut)
 		return E_INVALIDARG;
@@ -136,7 +136,7 @@ HRESULT PATH_ALLOC_COMBINE(PCSTR pszPathIn, PCSTR pszMore, unsigned long dwFlags
 			size_t sizeOfBuffer;
 			pszPathOutLength = 2 + pszMoreLength;
 			sizeOfBuffer = (pszPathOutLength + 1) * 2;
-			pszPathOut = (PSTR)HeapAlloc(GetProcessHeap(), 0, sizeOfBuffer * 2);
+			pszPathOut = (PSTR)calloc(sizeOfBuffer, 2);
 
 			if (!pszPathOut)
 				return E_OUTOFMEMORY;
@@ -151,7 +151,7 @@ HRESULT PATH_ALLOC_COMBINE(PCSTR pszPathIn, PCSTR pszMore, unsigned long dwFlags
 		size_t sizeOfBuffer;
 		pszPathOutLength = pszPathInLength + pszMoreLength;
 		sizeOfBuffer = (pszPathOutLength + 1) * 2;
-		pszPathOut = (PSTR)HeapAlloc(GetProcessHeap(), 0, sizeOfBuffer * 2);
+		pszPathOut = (PSTR)calloc(sizeOfBuffer, 2);
 
 		if (!pszPathOut)
 			return E_OUTOFMEMORY;

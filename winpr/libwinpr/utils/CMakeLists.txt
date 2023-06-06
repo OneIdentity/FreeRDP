@@ -19,12 +19,11 @@ include(CheckFunctionExists)
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
-set(${MODULE_PREFIX}_COLLECTIONS_SRCS
+set(COLLECTIONS_SRCS
 	collections/Queue.c
 	collections/Stack.c
 	collections/PubSub.c
-	collections/BipBuffer.c
-	collections/BitStream.c
+        collections/BitStream.c
 	collections/Reference.c
 	collections/ArrayList.c
 	collections/LinkedList.c
@@ -37,22 +36,11 @@ set(${MODULE_PREFIX}_COLLECTIONS_SRCS
 	collections/MessageQueue.c
 	collections/MessagePipe.c)
 
-set(${MODULE_PREFIX}_LODEPNG_SRCS
+set(LODEPNG_SRCS
 	lodepng/lodepng.c
 	lodepng/lodepng.h)
 
-set(${MODULE_PREFIX}_TRIO_SRCS
-	trio/strio.h
-	trio/trio.c
-	trio/trio.h
-	trio/triodef.h
-	trio/trionan.c
-	trio/trionan.h
-	trio/triop.h
-	trio/triostr.c
-	trio/triostr.h)
-
-if (HAVE_SYSLOG_H)
+if (WINPR_HAVE_SYSLOG_H)
 	set(SYSLOG_SRCS
 		wlog/SyslogAppender.c
 		wlog/SyslogAppender.h
@@ -69,7 +57,7 @@ if (LIBSYSTEMD_FOUND)
 	winpr_library_add_private(${LIBSYSTEMD_LIBRARY})
 endif()
 
-set(${MODULE_PREFIX}_WLOG_SRCS
+set(WLOG_SRCS
 	wlog/wlog.c
 	wlog/wlog.h
 	wlog/Layout.c
@@ -98,8 +86,11 @@ set(${MODULE_PREFIX}_WLOG_SRCS
 	${JOURNALD_SRCS}
 	)
 
+set(ASN1_SRCS
+	asn1/asn1.c
+)
 
-set(${MODULE_PREFIX}_SRCS
+set(SRCS
 	ini.c
 	sam.c
 	ntlm.c
@@ -114,18 +105,51 @@ set(${MODULE_PREFIX}_SRCS
 	ssl.c)
 
 if (ANDROID)
+	list(APPEND SRCS android.h android.c)
 	include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+    if (NOT WINPR_HAVE_UNWIND_H)
+        message("[backtrace] android NDK without unwind.h, falling back to corkscrew")
+        set(WINPR_HAVE_CORKSCREW 1)
+    endif()
 endif()
 
-winpr_module_add(${${MODULE_PREFIX}_SRCS}
-	${${MODULE_PREFIX}_COLLECTIONS_SRCS}
-	${${MODULE_PREFIX}_LODEPNG_SRCS}
-	${${MODULE_PREFIX}_TRIO_SRCS}
-	${${MODULE_PREFIX}_WLOG_SRCS})
+if (WINPR_HAVE_CORKSCREW)
+    list(APPEND SRCS
+        corkscrew/debug.c
+        corkscrew/debug.h)
+endif()
+
+if (WIN32)
+    list(APPEND SRCS
+        windows/debug.c
+        windows/debug.h)
+endif()
+
+if (WINPR_HAVE_EXECINFO_H)
+    list(APPEND SRCS
+        execinfo/debug.c
+        execinfo/debug.h)
+endif()
+
+if (WINPR_HAVE_UNWIND_H)
+    option(USE_UNWIND "Use unwind.h to generate backtraces" ON)
+    if (USE_UNWIND)
+        add_definitions(-DUSE_UNWIND)
+        list(APPEND SRCS
+            unwind/debug.c
+            unwind/debug.h)
+    endif()
+endif()
+
+winpr_module_add(${SRCS}
+	${COLLECTIONS_SRCS}
+	${LODEPNG_SRCS}
+	${WLOG_SRCS}
+	${ASN1_SRCS}
+)
 
 winpr_include_directory_add(
 	"lodepng"
-	"trio"
 	".")
 
 if(OPENSSL_FOUND)

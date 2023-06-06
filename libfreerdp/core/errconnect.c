@@ -18,9 +18,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <stdio.h>
 
@@ -96,6 +94,8 @@
 
 #define ERRCONNECT_NO_OR_MISSING_CREDENTIALS_STRING "Credentials invalid or missing."
 
+#define ERRCONNECT_ACTIVATION_TIMEOUT_STRING "Timeout waiting for activation."
+
 /* Special codes */
 #define ERRCONNECT_SUCCESS_STRING "Success."
 #define ERRCONNECT_NONE_STRING ""
@@ -130,6 +130,7 @@ static const ERRINFO ERRCONNECT_CODES[] = {
 	ERRCONNECT_DEFINE(ACCOUNT_EXPIRED, CAT_ADMIN),
 	ERRCONNECT_DEFINE(LOGON_TYPE_NOT_GRANTED, CAT_ADMIN),
 	ERRCONNECT_DEFINE(NO_OR_MISSING_CREDENTIALS, CAT_USE),
+	ERRCONNECT_DEFINE(ACTIVATION_TIMEOUT, CAT_PROTOCOL),
 
 	ERRCONNECT_DEFINE(NONE, CAT_NONE)
 };

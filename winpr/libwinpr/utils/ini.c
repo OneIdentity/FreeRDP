@@ -17,9 +17,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <winpr/config.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,23 +30,21 @@
 
 #include <winpr/ini.h>
 
-struct _wIniFileKey
+typedef struct
 {
 	char* name;
 	char* value;
-};
-typedef struct _wIniFileKey wIniFileKey;
+} wIniFileKey;
 
-struct _wIniFileSection
+typedef struct
 {
 	char* name;
 	size_t nKeys;
 	size_t cKeys;
 	wIniFileKey** keys;
-};
-typedef struct _wIniFileSection wIniFileSection;
+} wIniFileSection;
 
-struct _wIniFile
+struct s_wIniFile
 {
 	FILE* fp;
 	char* line;
@@ -161,7 +157,8 @@ static BOOL IniFile_Load_File(wIniFile* ini, const char* filename)
 	if (fread(ini->buffer, (size_t)fileSize, 1, ini->fp) != 1)
 		goto out_buffer;
 
-	fclose(ini->fp);
+	if (ini->fp)
+		fclose(ini->fp);
 	ini->fp = NULL;
 	ini->buffer[fileSize] = '\n';
 	ini->buffer[fileSize + 1] = '\0';
@@ -171,7 +168,8 @@ out_buffer:
 	free(ini->buffer);
 	ini->buffer = NULL;
 out_file:
-	fclose(ini->fp);
+	if (ini->fp)
+		fclose(ini->fp);
 	ini->fp = NULL;
 	return FALSE;
 }
@@ -782,7 +780,8 @@ int IniFile_WriteFile(wIniFile* ini, const char* filename)
 	if (fwrite((void*)buffer, length, 1, ini->fp) != 1)
 		ret = -1;
 
-	fclose(ini->fp);
+	if (ini->fp)
+		fclose(ini->fp);
 	free(buffer);
 	return ret;
 }

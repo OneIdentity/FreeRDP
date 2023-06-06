@@ -17,9 +17,8 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <winpr/config.h>
+#include <winpr/assert.h>
 
 #include <errno.h>
 #include <stdio.h>
@@ -28,12 +27,149 @@
 #include <wchar.h>
 
 #include <winpr/crt.h>
+#include <winpr/assert.h>
 #include <winpr/endian.h>
 
 /* String Manipulation (CRT): http://msdn.microsoft.com/en-us/library/f0151s4x.aspx */
 
 #include "../log.h"
 #define TAG WINPR_TAG("crt")
+
+#ifndef MIN
+#define MIN(x, y) (((x) < (y)) ? (x) : (y))
+#endif
+
+static const char rfc3986[] = {
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2d, 0x2e, 0x00,
+	0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x4f,
+	0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5a, 0x00, 0x00, 0x00, 0x00, 0x5f,
+	0x00, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6a, 0x6b, 0x6c, 0x6d, 0x6e, 0x6f,
+	0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7a, 0x00, 0x00, 0x00, 0x7e, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+};
+
+static char hex2bin(char what)
+{
+	if (what >= 'a')
+		what -= 'a' - 'A';
+	if (what >= 'A')
+		what -= ('A' - 10);
+	else
+		what -= '0';
+	return what;
+}
+
+static char unescape(const char* what, size_t* px)
+{
+	if ((*what == '%') && (isxdigit(what[1]) && isxdigit(what[2])))
+	{
+		*px += 2;
+		return 16 * hex2bin(what[1]) + hex2bin(what[2]);
+	}
+
+	if (*what == '+')
+		return ' ';
+
+	return *what;
+}
+
+char* winpr_str_url_decode(const char* str, size_t len)
+{
+	char* dst = calloc(len + 1, sizeof(char));
+	if (!dst)
+		return NULL;
+
+	size_t pos = 0;
+	for (size_t x = 0; x < strnlen(str, len); x++)
+	{
+		const char* cur = &str[x];
+		dst[pos++] = unescape(cur, &x);
+	}
+	return dst;
+}
+
+static char* escape(char* dst, char what)
+{
+	if (rfc3986[what & 0xff])
+	{
+		*dst = what;
+		return dst + 1;
+	}
+
+	sprintf(dst, "%%%02" PRIX8, what & 0xff);
+	return dst + 3;
+}
+
+char* winpr_str_url_encode(const char* str, size_t len)
+{
+	char* dst = calloc(len + 1, sizeof(char) * 3);
+	if (!dst)
+		return NULL;
+
+	char* ptr = dst;
+	for (size_t x = 0; x < strnlen(str, len); x++)
+	{
+		const char cur = str[x];
+		ptr = escape(ptr, cur);
+	}
+	return dst;
+}
+
+BOOL winpr_str_append(const char* what, char* buffer, size_t size, const char* separator)
+{
+	const size_t used = strnlen(buffer, size);
+	const size_t add = strnlen(what, size);
+	const size_t sep_len = separator ? strnlen(separator, size) : 0;
+	const size_t sep = (used > 0) ? sep_len : 0;
+
+	if (used + add + sep >= size)
+		return FALSE;
+
+	if ((used > 0) && (sep_len > 0))
+		strncat(buffer, separator, sep_len);
+
+	strncat(buffer, what, add);
+	return TRUE;
+}
+
+int winpr_asprintf(char** s, size_t* slen, const char* templ, ...)
+{
+	va_list ap;
+
+	WINPR_ASSERT(s);
+	WINPR_ASSERT(slen);
+	*s = NULL;
+	*slen = 0;
+
+	va_start(ap, templ);
+	const int length = vsnprintf(NULL, 0, templ, ap);
+	va_end(ap);
+	if (length < 0)
+		return length;
+
+	char* str = calloc((size_t)length + 1ul, sizeof(char));
+	if (!str)
+		return -1;
+
+	va_start(ap, templ);
+	const int plen = vsprintf(str, templ, ap);
+	va_end(ap);
+
+	WINPR_ASSERT(length == plen);
+	*s = str;
+	*slen = (size_t)length;
+	return length;
+}
 
 #ifndef _WIN32
 
@@ -82,17 +218,37 @@ int _strnicmp(const char* string1, const char* string2, size_t count)
 
 int _wcscmp(const WCHAR* string1, const WCHAR* string2)
 {
-	WCHAR value1, value2;
+	WINPR_ASSERT(string1);
+	WINPR_ASSERT(string2);
 
-	while (*string1 && (*string1 == *string2))
+	while (TRUE)
 	{
-		string1++;
-		string2++;
-	}
+		const WCHAR w1 = *string1++;
+		const WCHAR w2 = *string2++;
 
-	Data_Read_UINT16(string1, value1);
-	Data_Read_UINT16(string2, value2);
-	return value1 - value2;
+		if (w1 != w2)
+			return (int)w1 - w2;
+		else if ((w1 == '\0') || (w2 == '\0'))
+			return (int)w1 - w2;
+	}
+}
+
+int _wcsncmp(const WCHAR* string1, const WCHAR* string2, size_t count)
+{
+	WINPR_ASSERT(string1);
+	WINPR_ASSERT(string2);
+
+	for (size_t x = 0; x < count; x++)
+	{
+		const WCHAR a = string1[x];
+		const WCHAR b = string2[x];
+
+		if (a != b)
+			return (int)a - b;
+		else if ((a == '\0') || (b == '\0'))
+			return (int)a - b;
+	}
+	return 0;
 }
 
 /* _wcslen -> wcslen */
@@ -101,8 +257,7 @@ size_t _wcslen(const WCHAR* str)
 {
 	const WCHAR* p = (const WCHAR*)str;
 
-	if (!p)
-		return 0;
+	WINPR_ASSERT(p);
 
 	while (*p)
 		p++;
@@ -116,8 +271,7 @@ size_t _wcsnlen(const WCHAR* str, size_t max)
 {
 	size_t x;
 
-	if (!str)
-		return 0;
+	WINPR_ASSERT(str);
 
 	for (x = 0; x < max; x++)
 	{
@@ -128,35 +282,67 @@ size_t _wcsnlen(const WCHAR* str, size_t max)
 	return x;
 }
 
+/* _wcsstr -> wcsstr */
+
+WCHAR* _wcsstr(const WCHAR* str, const WCHAR* strSearch)
+{
+	WINPR_ASSERT(str);
+	WINPR_ASSERT(strSearch);
+
+	if (strSearch[0] == '\0')
+		return (WCHAR*)str;
+
+	const size_t searchLen = _wcslen(strSearch);
+	while (*str)
+	{
+		if (_wcsncmp(str, strSearch, searchLen) == 0)
+			return (WCHAR*)str;
+		str++;
+	}
+	return NULL;
+}
+
 /* _wcschr -> wcschr */
 
-WCHAR* _wcschr(const WCHAR* str, WCHAR c)
+WCHAR* _wcschr(const WCHAR* str, WCHAR value)
 {
+	union
+	{
+		const WCHAR* cc;
+		WCHAR* c;
+	} cnv;
 	const WCHAR* p = (const WCHAR*)str;
-	WCHAR value;
-	Data_Write_UINT16(&value, c);
 
 	while (*p && (*p != value))
 		p++;
 
-	return ((*p == value) ? (WCHAR*)p : NULL);
+	cnv.cc = (*p == value) ? p : NULL;
+	return cnv.c;
 }
 
 /* _wcsrchr -> wcsrchr */
 
 WCHAR* _wcsrchr(const WCHAR* str, WCHAR c)
 {
-	const WCHAR* p;
-	WCHAR ch;
+	union
+	{
+		const WCHAR* cc;
+		WCHAR* c;
+	} cnv;
+	const WCHAR* p = NULL;
 
 	if (!str)
 		return NULL;
 
-	for (p = (const WCHAR*)0; (ch = *str); str++)
+	for (; *str != '\0'; str++)
+	{
+		const WCHAR ch = *str;
 		if (ch == c)
-			p = (const WCHAR*)str;
+			p = str;
+	}
 
-	return (WCHAR*)p;
+	cnv.cc = p;
+	return cnv.c;
 }
 
 char* strtok_s(char* strToken, const char* strDelimit, char** context)
@@ -484,76 +670,82 @@ int lstrcmpW(LPCWSTR lpString1, LPCWSTR lpString2)
 
 #endif
 
-int ConvertLineEndingToLF(char* str, int size)
+size_t ConvertLineEndingToLF(char* str, size_t size)
 {
-	int status;
-	char* end;
-	char* pInput;
-	char* pOutput;
-	end = &str[size];
-	pInput = pOutput = str;
+	size_t skip = 0;
 
-	while (pInput < end)
+	WINPR_ASSERT(str || (size == 0));
+	for (size_t x = 0; x < size; x++)
 	{
-		if ((pInput[0] == '\r') && (pInput[1] == '\n'))
+		char c = str[x];
+		switch (c)
 		{
-			*pOutput++ = '\n';
-			pInput += 2;
-		}
-		else
-		{
-			*pOutput++ = *pInput++;
+			case '\r':
+				str[x - skip] = '\n';
+				if ((x + 1 < size) && (str[x + 1] == '\n'))
+					skip++;
+				break;
+			default:
+				str[x - skip] = c;
+				break;
 		}
 	}
-
-	status = (int)(pOutput - str);
-	return status;
+	return size - skip;
 }
 
-char* ConvertLineEndingToCRLF(const char* str, int* size)
+char* ConvertLineEndingToCRLF(const char* str, size_t* size)
 {
-	int count;
-	char* newStr;
-	char* pOutput;
-	const char* end;
-	const char* pInput;
-	end = &str[*size];
-	count = 0;
-	pInput = str;
+	WINPR_ASSERT(size);
+	const size_t s = *size;
+	WINPR_ASSERT(str || (s == 0));
 
-	while (pInput < end)
-	{
-		if (*pInput == '\n')
-			count++;
-
-		pInput++;
-	}
-
-	newStr = (char*)malloc(*size + (count * 2) + 1);
-
-	if (!newStr)
+	*size = 0;
+	if (s == 0)
 		return NULL;
 
-	pInput = str;
-	pOutput = newStr;
-
-	while (pInput < end)
+	size_t linebreaks = 0;
+	for (size_t x = 0; x < s - 1; x++)
 	{
-		if ((*pInput == '\n') && ((pInput > str) && (pInput[-1] != '\r')))
+		char c = str[x];
+		switch (c)
 		{
-			*pOutput++ = '\r';
-			*pOutput++ = '\n';
+			case '\r':
+			case '\n':
+				linebreaks++;
+				break;
+			default:
+				break;
 		}
-		else
-		{
-			*pOutput++ = *pInput;
-		}
-
-		pInput++;
 	}
+	char* cnv = calloc(s + linebreaks * 2ull + 1ull, sizeof(char));
+	if (!cnv)
+		return NULL;
 
-	*size = (int)(pOutput - newStr);
-	return newStr;
+	size_t pos = 0;
+	for (size_t x = 0; x < s; x++)
+	{
+		const char c = str[x];
+		switch (c)
+		{
+			case '\r':
+				cnv[pos++] = '\r';
+				cnv[pos++] = '\n';
+				break;
+			case '\n':
+				/* Do not duplicate existing \r\n sequences */
+				if ((x > 0) && (str[x - 1] != '\r'))
+				{
+					cnv[pos++] = '\r';
+					cnv[pos++] = '\n';
+				}
+				break;
+			default:
+				cnv[pos++] = c;
+				break;
+		}
+	}
+	*size = pos;
+	return cnv;
 }
 
 char* StrSep(char** stringp, const char* delim)
@@ -616,3 +808,13 @@ INT64 GetLine(char** lineptr, size_t* size, FILE* stream)
 	return -1;
 #endif
 }
+
+#if !defined(WINPR_HAVE_STRNDUP)
+char* strndup(const char* src, size_t n)
+{
+	char* dst = calloc(n + 1, sizeof(char));
+	if (dst)
+		strncpy(dst, src, n);
+	return dst;
+}
+#endif

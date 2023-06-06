@@ -20,9 +20,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -37,6 +35,9 @@
 #include "nsc_encode.h"
 
 #include "nsc_sse2.h"
+
+#include <freerdp/log.h>
+#define TAG FREERDP_TAG("codec.nsc")
 
 #ifndef NSC_INIT_SIMD
 #define NSC_INIT_SIMD(_nsc_context) \
@@ -221,7 +222,7 @@ static BOOL nsc_stream_initialize(NSC_CONTEXT* context, wStream* s)
 {
 	int i;
 
-	if (Stream_GetRemainingLength(s) < 20)
+	if (!Stream_CheckAndLogRequiredLength(TAG, s, 20))
 		return FALSE;
 
 	for (i = 0; i < 4; i++)
@@ -246,19 +247,9 @@ static BOOL nsc_context_initialize(NSC_CONTEXT* context, wStream* s)
 
 	length = context->width * context->height * 4;
 
-	if (!context->BitmapData)
+	if (!context->BitmapData || (length > context->BitmapDataLength))
 	{
-		context->BitmapData = calloc(1, length + 16);
-
-		if (!context->BitmapData)
-			return FALSE;
-
-		context->BitmapDataLength = length;
-	}
-	else if (length > context->BitmapDataLength)
-	{
-		void* tmp;
-		tmp = realloc(context->BitmapData, length + 16);
+		void* tmp = winpr_aligned_recalloc(context->BitmapData, length + 16, sizeof(BYTE), 32);
 
 		if (!tmp)
 			return FALSE;
@@ -276,7 +267,8 @@ static BOOL nsc_context_initialize(NSC_CONTEXT* context, wStream* s)
 	{
 		for (i = 0; i < 4; i++)
 		{
-			void* tmp = (BYTE*)realloc(context->priv->PlaneBuffers[i], length);
+			void* tmp = (BYTE*)winpr_aligned_recalloc(context->priv->PlaneBuffers[i], length,
+			                                          sizeof(BYTE), 32);
 
 			if (!tmp)
 				return FALSE;
@@ -302,7 +294,8 @@ static BOOL nsc_context_initialize(NSC_CONTEXT* context, wStream* s)
 	return TRUE;
 }
 
-static void nsc_profiler_print(NSC_CONTEXT_PRIV* priv){
+static void nsc_profiler_print(NSC_CONTEXT_PRIV* priv)
+{
 	WINPR_UNUSED(priv);
 
 	PROFILER_PRINT_HEADER
@@ -328,13 +321,12 @@ BOOL nsc_context_reset(NSC_CONTEXT* context, UINT32 width, UINT32 height)
 
 NSC_CONTEXT* nsc_context_new(void)
 {
-	NSC_CONTEXT* context;
-	context = (NSC_CONTEXT*)calloc(1, sizeof(NSC_CONTEXT));
+	NSC_CONTEXT* context = (NSC_CONTEXT*)winpr_aligned_calloc(1, sizeof(NSC_CONTEXT), 32);
 
 	if (!context)
 		return NULL;
 
-	context->priv = (NSC_CONTEXT_PRIV*)calloc(1, sizeof(NSC_CONTEXT_PRIV));
+	context->priv = (NSC_CONTEXT_PRIV*)winpr_aligned_calloc(1, sizeof(NSC_CONTEXT_PRIV), 32);
 
 	if (!context->priv)
 		goto error;
@@ -362,26 +354,24 @@ error:
 
 void nsc_context_free(NSC_CONTEXT* context)
 {
-	size_t i;
-
 	if (!context)
 		return;
 
 	if (context->priv)
 	{
-		for (i = 0; i < 5; i++)
-			free(context->priv->PlaneBuffers[i]);
+		for (size_t i = 0; i < 5; i++)
+			winpr_aligned_free(context->priv->PlaneBuffers[i]);
 
 		nsc_profiler_print(context->priv);
 		PROFILER_FREE(context->priv->prof_nsc_rle_decompress_data)
 		PROFILER_FREE(context->priv->prof_nsc_decode)
 		PROFILER_FREE(context->priv->prof_nsc_rle_compress_data)
 		PROFILER_FREE(context->priv->prof_nsc_encode)
-		free(context->priv);
+		winpr_aligned_free(context->priv);
 	}
 
-	free(context->BitmapData);
-	free(context);
+	winpr_aligned_free(context->BitmapData);
+	winpr_aligned_free(context);
 }
 
 #if defined(WITH_FREERDP_DEPRECATED)
@@ -422,17 +412,18 @@ BOOL nsc_process_message(NSC_CONTEXT* context, UINT16 bpp, UINT32 width, UINT32 
                          UINT32 nHeight, UINT32 flip)
 {
 	wStream* s;
+	wStream sbuffer = { 0 };
 	BOOL ret;
 	if (!context || !data || !pDstData)
 		return FALSE;
 
-	s = Stream_New((BYTE*)data, length);
+	s = Stream_StaticConstInit(&sbuffer, data, length);
 
 	if (!s)
 		return FALSE;
 
 	if (nDstStride == 0)
-		nDstStride = nWidth * GetBytesPerPixel(DstFormat);
+		nDstStride = nWidth * FreeRDPGetBytesPerPixel(DstFormat);
 
 	switch (bpp)
 	{
@@ -457,14 +448,12 @@ BOOL nsc_process_message(NSC_CONTEXT* context, UINT16 bpp, UINT32 width, UINT32 
 			break;
 
 		default:
-			Stream_Free(s, TRUE);
 			return FALSE;
 	}
 
 	context->width = width;
 	context->height = height;
 	ret = nsc_context_initialize(context, s);
-	Stream_Free(s, FALSE);
 
 	if (!ret)
 		return FALSE;

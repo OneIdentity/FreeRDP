@@ -46,9 +46,11 @@ BuildRequires: uuid-devel
 BuildRequires: libxml2-devel
 BuildRequires: zlib-devel
 BuildRequires: krb5-devel
+BuildRequires: cjson-devel
 
 # (Open)Suse
 %if %{defined suse_version}
+BuildRequires: libSDL2-devel
 BuildRequires: docbook-xsl-stylesheets
 BuildRequires: libxslt-tools
 BuildRequires: pkg-config
@@ -58,8 +60,6 @@ BuildRequires: libpulse-devel
 BuildRequires: libusb-1_0-devel
 BuildRequires: libudev-devel
 BuildRequires: dbus-1-glib-devel
-BuildRequires: gstreamer-devel
-BuildRequires: gstreamer-plugins-base-devel
 BuildRequires: wayland-devel
 BuildRequires: libjpeg-devel
 BuildRequires: libavutil-devel
@@ -68,6 +68,7 @@ BuildRequires: libswresample-devel
 %endif
 # fedora 21+
 %if 0%{?fedora} >= 21 || 0%{?rhel} >= 7
+BuildRequires: SDL2-devel
 BuildRequires: docbook-style-xsl
 BuildRequires: libxslt
 BuildRequires: pkgconfig
@@ -77,8 +78,6 @@ BuildRequires: pulseaudio-libs-devel
 BuildRequires: libusbx-devel
 BuildRequires: systemd-devel
 BuildRequires: dbus-glib-devel
-BuildRequires: gstreamer1-devel
-BuildRequires: gstreamer1-plugins-base-devel
 BuildRequires: libjpeg-turbo-devel
 %endif 
 
@@ -88,6 +87,10 @@ BuildRequires: wayland-devel
 
 %if 0%{?rhel} >= 8
 BuildRequires: libwayland-client-devel
+%endif
+
+%if 0%{?fedora} >= 36 || 0%{?rhel} >= 9
+BuildRequires: ffmpeg-free-devel
 %endif
 
 BuildRoot:      %{_tmppath}/%{name}-%{version}-build
@@ -114,20 +117,20 @@ cp %{_topdir}/SOURCES/source_version freerdp-nightly-%{version}/.source_version
 
 %cmake  -DCMAKE_SKIP_RPATH=FALSE \
         -DCMAKE_SKIP_INSTALL_RPATH=FALSE \
+        -DWITH_FREERDP_DEPRECATED_COMMANDLINE=ON \
         -DWITH_PULSE=ON \
         -DWITH_CHANNELS=ON \
-        -DBUILTIN_CHANNELS=ON \
         -DWITH_CUPS=ON \
         -DWITH_PCSC=ON \
         -DWITH_JPEG=ON \
-%if %{defined suse_version}
+%if 0%{?fedora} >= 36 || 0%{?rhel} >= 9 || 0%{?suse_version}
         -DWITH_FFMPEG=ON \
         -DWITH_DSP_FFMPEG=ON \
 %endif
 %if 0%{?fedora} < 21 || 0%{?rhel} < 8
         -DWITH_WAYLAND=OFF \
 %endif
-        -DWITH_GSSAPI=OFF \
+        -DWITH_KRB5=ON \
         -DCHANNEL_URBDRC=ON \
         -DCHANNEL_URBDRC_CLIENT=ON \
         -DWITH_SERVER=ON \

@@ -17,9 +17,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <winpr/assert.h>
 #include <stdio.h>
@@ -30,6 +28,9 @@
 #include <winpr/synch.h>
 #include <winpr/thread.h>
 #include <winpr/stream.h>
+
+#include <freerdp/freerdp.h>
+#include <freerdp/codec/color.h>
 
 #include <freerdp/channels/wtsvc.h>
 #include <freerdp/channels/log.h>
@@ -147,7 +148,7 @@ out:
  * to the stream before return, but the pduLength field might be
  * changed in rdpgfx_server_single_packet_send.
  *
- * @param cmdId
+ * @param cmdId The CommandID to write
  * @param dataLen estimated data length without header
  *
  * @return new stream
@@ -218,8 +219,8 @@ static UINT rdpgfx_send_caps_confirm_pdu(RdpgfxServerContext* context,
 		return CHANNEL_RC_NO_MEMORY;
 	}
 
-	WLog_DBG(TAG, "[%s] CAPS version=0x%04" PRIx32 ", flags=0x%04" PRIx32 ", length=%" PRIu32,
-	         __FUNCTION__, capsSet->version, capsSet->flags, capsSet->length);
+	WLog_DBG(TAG, "CAPS version=0x%04" PRIx32 ", flags=0x%04" PRIx32 ", length=%" PRIu32,
+	         capsSet->version, capsSet->flags, capsSet->length);
 	Stream_Write_UINT32(s, capsSet->version); /* version (4 bytes) */
 	Stream_Write_UINT32(s, capsSet->length);  /* capsDataLength (4 bytes) */
 
@@ -1100,11 +1101,8 @@ static UINT rdpgfx_recv_frame_acknowledge_pdu(RdpgfxServerContext* context, wStr
 	RDPGFX_FRAME_ACKNOWLEDGE_PDU pdu;
 	UINT error = CHANNEL_RC_OK;
 
-	if (Stream_GetRemainingLength(s) < 12)
-	{
-		WLog_ERR(TAG, "not enough data!");
+	if (!Stream_CheckAndLogRequiredLength(TAG, s, 12))
 		return ERROR_INVALID_DATA;
-	}
 
 	Stream_Read_UINT32(s, pdu.queueDepth);         /* queueDepth (4 bytes) */
 	Stream_Read_UINT32(s, pdu.frameId);            /* frameId (4 bytes) */
@@ -1130,14 +1128,11 @@ static UINT rdpgfx_recv_cache_import_offer_pdu(RdpgfxServerContext* context, wSt
 {
 	UINT16 index;
 	RDPGFX_CACHE_IMPORT_OFFER_PDU pdu = { 0 };
-	RDPGFX_CACHE_ENTRY_METADATA* cacheEntries;
+	RDPGFX_CACHE_ENTRY_METADATA* cacheEntry;
 	UINT error = CHANNEL_RC_OK;
 
-	if (Stream_GetRemainingLength(s) < 2)
-	{
-		WLog_ERR(TAG, "not enough data!");
+	if (!Stream_CheckAndLogRequiredLength(TAG, s, 2))
 		return ERROR_INVALID_DATA;
-	}
 
 	/* cacheEntriesCount (2 bytes) */
 	Stream_Read_UINT16(s, pdu.cacheEntriesCount);
@@ -1149,29 +1144,14 @@ static UINT rdpgfx_recv_cache_import_offer_pdu(RdpgfxServerContext* context, wSt
 		return ERROR_INVALID_DATA;
 	}
 
-	if (Stream_GetRemainingLength(s) / 12 < pdu.cacheEntriesCount)
-	{
-		WLog_ERR(TAG, "not enough data!");
+	if (!Stream_CheckAndLogRequiredLengthOfSize(TAG, s, pdu.cacheEntriesCount, 12ull))
 		return ERROR_INVALID_DATA;
-	}
-
-	if (pdu.cacheEntriesCount > 0)
-	{
-		pdu.cacheEntries = (RDPGFX_CACHE_ENTRY_METADATA*)calloc(
-		    pdu.cacheEntriesCount, sizeof(RDPGFX_CACHE_ENTRY_METADATA));
-
-		if (!pdu.cacheEntries)
-		{
-			WLog_ERR(TAG, "calloc failed!");
-			return CHANNEL_RC_NO_MEMORY;
-		}
-	}
 
 	for (index = 0; index < pdu.cacheEntriesCount; index++)
 	{
-		cacheEntries = &(pdu.cacheEntries[index]);
-		Stream_Read_UINT64(s, cacheEntries->cacheKey);     /* cacheKey (8 bytes) */
-		Stream_Read_UINT32(s, cacheEntries->bitmapLength); /* bitmapLength (4 bytes) */
+		cacheEntry = &(pdu.cacheEntries[index]);
+		Stream_Read_UINT64(s, cacheEntry->cacheKey);     /* cacheKey (8 bytes) */
+		Stream_Read_UINT32(s, cacheEntry->bitmapLength); /* bitmapLength (4 bytes) */
 	}
 
 	if (context)
@@ -1182,7 +1162,6 @@ static UINT rdpgfx_recv_cache_import_offer_pdu(RdpgfxServerContext* context, wSt
 			WLog_ERR(TAG, "context->CacheImportOffer failed with error %" PRIu32 "", error);
 	}
 
-	free(pdu.cacheEntries);
 	return error;
 }
 
@@ -1201,11 +1180,8 @@ static UINT rdpgfx_recv_caps_advertise_pdu(RdpgfxServerContext* context, wStream
 	if (!context)
 		return ERROR_BAD_ARGUMENTS;
 
-	if (Stream_GetRemainingLength(s) < 2)
-	{
-		WLog_ERR(TAG, "not enough data!");
+	if (!Stream_CheckAndLogRequiredLength(TAG, s, 2))
 		return ERROR_INVALID_DATA;
-	}
 
 	Stream_Read_UINT16(s, pdu.capsSetCount); /* capsSetCount (2 bytes) */
 	if (pdu.capsSetCount > 0)
@@ -1221,7 +1197,7 @@ static UINT rdpgfx_recv_caps_advertise_pdu(RdpgfxServerContext* context, wStream
 	{
 		RDPGFX_CAPSET* capsSet = &(pdu.capsSets[index]);
 
-		if (Stream_GetRemainingLength(s) < 8)
+		if (!Stream_CheckAndLogRequiredLength(TAG, s, 8))
 			goto fail;
 
 		Stream_Read_UINT32(s, capsSet->version); /* version (4 bytes) */
@@ -1229,7 +1205,7 @@ static UINT rdpgfx_recv_caps_advertise_pdu(RdpgfxServerContext* context, wStream
 
 		if (capsSet->length >= 4)
 		{
-			if (Stream_GetRemainingLength(s) < 4)
+			if (!Stream_CheckAndLogRequiredLength(TAG, s, 4))
 				goto fail;
 
 			Stream_Peek_UINT32(s, capsSet->flags); /* capsData (4 bytes) */
@@ -1260,11 +1236,8 @@ static UINT rdpgfx_recv_qoe_frame_acknowledge_pdu(RdpgfxServerContext* context, 
 	RDPGFX_QOE_FRAME_ACKNOWLEDGE_PDU pdu;
 	UINT error = CHANNEL_RC_OK;
 
-	if (Stream_GetRemainingLength(s) < 12)
-	{
-		WLog_ERR(TAG, "not enough data!");
+	if (!Stream_CheckAndLogRequiredLength(TAG, s, 12))
 		return ERROR_INVALID_DATA;
-	}
 
 	Stream_Read_UINT32(s, pdu.frameId);     /* frameId (4 bytes) */
 	Stream_Read_UINT32(s, pdu.timestamp);   /* timestamp (4 bytes) */
@@ -1380,7 +1353,7 @@ static UINT rdpgfx_server_receive_pdu(RdpgfxServerContext* context, wStream* s)
 
 	if (end != (beg + header.pduLength))
 	{
-		WLog_ERR(TAG, "Unexpected gfx pdu end: Actual: %d, Expected: %" PRIu32 "", end,
+		WLog_ERR(TAG, "Unexpected gfx pdu end: Actual: %" PRIuz ", Expected: %" PRIuz "", end,
 		         (beg + header.pduLength));
 		Stream_SetPosition(s, (beg + header.pduLength));
 	}
@@ -1393,12 +1366,10 @@ static DWORD WINAPI rdpgfx_server_thread_func(LPVOID arg)
 	RdpgfxServerContext* context = (RdpgfxServerContext*)arg;
 	RdpgfxServerPrivate* priv = context->priv;
 	DWORD status;
-	DWORD nCount;
-	void* buffer;
-	HANDLE events[8];
+	DWORD nCount = 0;
+	HANDLE events[8] = { 0 };
 	UINT error = CHANNEL_RC_OK;
-	buffer = NULL;
-	nCount = 0;
+
 	events[nCount++] = priv->stopEvent;
 	events[nCount++] = priv->channelEvent;
 
@@ -1442,6 +1413,8 @@ static BOOL rdpgfx_server_open(RdpgfxServerContext* context)
 		PULONG pSessionId = NULL;
 		DWORD BytesReturned = 0;
 		priv->SessionId = WTS_CURRENT_SESSION;
+		UINT32 channelId;
+		BOOL status = TRUE;
 
 		if (WTSQuerySessionInformationA(context->vcm, WTS_CURRENT_SESSION, WTSSessionId,
 		                                (LPSTR*)&pSessionId, &BytesReturned) == FALSE)
@@ -1459,6 +1432,15 @@ static BOOL rdpgfx_server_open(RdpgfxServerContext* context)
 		{
 			WLog_ERR(TAG, "WTSVirtualChannelOpenEx failed!");
 			return FALSE;
+		}
+
+		channelId = WTSChannelGetIdByHandle(priv->rdpgfx_channel);
+
+		IFCALLRET(context->ChannelIdAssigned, status, context, channelId);
+		if (!status)
+		{
+			WLog_ERR(TAG, "context->ChannelIdAssigned failed!");
+			goto out_close;
 		}
 
 		/* Query for channel event handle */

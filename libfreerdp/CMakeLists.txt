@@ -24,7 +24,7 @@ include(FindCairo)
 # Create imported targets for Intel IPP libraries
 
 if(IPP_FOUND)
-        foreach(ipp_lib ${IPP_LIBRARIES})
+    foreach(ipp_lib ${IPP_LIBRARIES})
         add_library("${ipp_lib}_imported" STATIC IMPORTED)
         set_property(TARGET "${ipp_lib}_imported" PROPERTY IMPORTED_LOCATION "${IPP_LIBRARY_DIRS}/${ipp_lib}")
     endforeach()
@@ -91,18 +91,19 @@ endif(WITH_CAIRO)
 
 # Prefer SWScale over Cairo, both at the same time are not possible.
 if (WITH_SWSCALE)
-    add_definitions(-DSWSCALE_FOUND=1)
     include_directories(${SWScale_INCLUDE_DIR})
     freerdp_library_add(${SWScale_LIBRARY})
-elseif (WITH_CAIRO)
-    add_definitions(-DCAIRO_FOUND=1)
+endif()
+if (WITH_CAIRO)
     include_directories(${CAIRO_INCLUDE_DIR})
     freerdp_library_add(${CAIRO_LIBRARY})
-else()
+endif()
+if (NOT WITH_SWSCALE AND NOT WITH_CAIRO)
     message(WARNING "-DWITH_SWSCALE=OFF and -DWITH_CAIRO=OFF, compiling without image scaling support!")
 endif()
 
 set(${MODULE_PREFIX}_SUBMODULES
+    emu
     utils
     common
     gdi
@@ -124,6 +125,8 @@ endif ()
 
 # codec
 set(CODEC_SRCS
+	codec/bulk.c
+	codec/bulk.h
     codec/dsp.c
     codec/color.c
     codec/audio.c
@@ -187,6 +190,8 @@ if (WITH_DSP_FFMPEG)
         ${CODEC_SRCS}
         codec/dsp_ffmpeg.c
         codec/dsp_ffmpeg.h)
+	freerdp_include_directory_add(${FFMPEG_INCLUDE_DIRS})
+	freerdp_library_add(${FFMPEG_LIBRARIES})
 endif (WITH_DSP_FFMPEG)
 
 if (WITH_SOXR)
@@ -214,6 +219,11 @@ if(FAAC_FOUND)
     include_directories(${FAAC_INCLUDE_DIRS})
 endif()
 
+if(WITH_CJSON)
+    freerdp_library_add(${CJSON_LIBRARIES})
+    include_directories(${CJSON_INCLUDE_DIRS})
+endif()
+
 if(WITH_NEON)
     check_symbol_exists("_M_AMD64"     ""  MSVC_ARM64)
     check_symbol_exists("__aarch64__"  ""  ARCH_ARM64)
@@ -238,7 +248,7 @@ if(WITH_OPENH264)
     endif (NOT WITH_OPENH264_LOADING)
 endif()
 
-if(WITH_FFMPEG)
+if(WITH_VIDEO_FFMPEG)
     set(CODEC_SRCS ${CODEC_SRCS} codec/h264_ffmpeg.c)
     freerdp_include_directory_add(${FFMPEG_INCLUDE_DIRS})
     freerdp_library_add(${FFMPEG_LIBRARIES})
@@ -246,6 +256,13 @@ endif()
 
 if(WIN32 AND WITH_MEDIA_FOUNDATION)
     set(CODEC_SRCS ${CODEC_SRCS} codec/h264_mf.c)
+endif()
+
+if(ANDROID AND WITH_MEDIACODEC)
+    list(APPEND CODEC_SRCS codec/h264_mediacodec.c)
+
+		find_library(MEDIACODEC mediandk REQUIRED)
+		freerdp_library_add(${MEDIACODEC})
 endif()
 
 freerdp_module_add(${CODEC_SRCS})
@@ -272,28 +289,30 @@ set(PRIMITIVES_SRCS
     primitives/primitives.c
     primitives/prim_internal.h)
 
-set(PRIMITIVES_SSE2_SRCS
-    primitives/prim_colors_opt.c
-    primitives/prim_set_opt.c)
+if (WITH_SSE2 OR WITH_NEON)
+    set(PRIMITIVES_SSE2_SRCS
+        primitives/prim_colors_opt.c
+        primitives/prim_set_opt.c)
 
-set(PRIMITIVES_SSE3_SRCS
-    primitives/prim_add_opt.c
-    primitives/prim_alphaComp_opt.c
-    primitives/prim_andor_opt.c
-    primitives/prim_shift_opt.c)
+    set(PRIMITIVES_SSE3_SRCS
+        primitives/prim_add_opt.c
+        primitives/prim_alphaComp_opt.c
+        primitives/prim_andor_opt.c
+        primitives/prim_shift_opt.c)
 
-set(PRIMITIVES_SSSE3_SRCS
-    primitives/prim_sign_opt.c
-    primitives/prim_YCoCg_opt.c)
+    set(PRIMITIVES_SSSE3_SRCS
+        primitives/prim_sign_opt.c
+        primitives/prim_YCoCg_opt.c)
 
-if (WITH_SSE2)
-    set(PRIMITIVES_SSSE3_SRCS ${PRIMITIVES_SSSE3_SRCS}
-        primitives/prim_YUV_ssse3.c)
-endif()
+    if (WITH_SSE2)
+        set(PRIMITIVES_SSSE3_SRCS ${PRIMITIVES_SSSE3_SRCS}
+            primitives/prim_YUV_ssse3.c)
+    endif()
 
-if (WITH_NEON)
-    set(PRIMITIVES_SSSE3_SRCS ${PRIMITIVES_SSSE3_SRCS}
-        primitives/prim_YUV_neon.c)
+    if (WITH_NEON)
+        set(PRIMITIVES_SSSE3_SRCS ${PRIMITIVES_SSSE3_SRCS}
+            primitives/prim_YUV_neon.c)
+    endif()
 endif()
 
 if (WITH_OPENCL)
@@ -310,11 +329,9 @@ set(PRIMITIVES_OPT_SRCS
     ${PRIMITIVES_SSSE3_SRCS}
     ${PRIMITIVES_OPENCL_SRCS})
 
-freerdp_definition_add(-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE})
-
 ### IPP Variable debugging
 if(WITH_IPP)
-    if(CMAKE_COMPILER_IS_GNUCC)
+    if(CMAKE_COMPILER_IS_GNUCC OR ${CMAKE_C_COMPILER_ID} STREQUAL "Clang")
         foreach(INCLDIR ${IPP_INCLUDE_DIRS})
             set(OPTIMIZATION "${OPTIMIZATION} -I${INCLDIR}")
         endforeach(INCLDIR)
@@ -336,9 +353,11 @@ if(WITH_SSE2)
             PROPERTIES COMPILE_FLAGS "${OPTIMIZATION} /arch:SSE2")
     endif()
 elseif(WITH_NEON)
-    if(CMAKE_COMPILER_IS_GNUCC)
-        set_source_files_properties(${PRIMITIVES_OPT_SRCS}
-            PROPERTIES COMPILE_FLAGS "${OPTIMIZATION} -mfpu=neon")
+    if(CMAKE_COMPILER_IS_GNUCC OR ${CMAKE_C_COMPILER_ID} STREQUAL "Clang")
+        if (NOT MSVC_ARM64 AND NOT ARCH_ARM64)
+            set_source_files_properties(${PRIMITIVES_OPT_SRCS}
+                PROPERTIES COMPILE_FLAGS "${OPTIMIZATION} -mfpu=neon")
+        endif()
     endif()
     # TODO: Add MSVC equivalent
 endif()
@@ -392,10 +411,6 @@ if (WITH_LIBRARY_VERSIONING)
     set_target_properties(${MODULE_NAME} PROPERTIES VERSION ${FREERDP_VERSION} SOVERSION ${FREERDP_API_VERSION})
 endif()
 
-if (MINGW)
-	freerdp_library_add(ucrt)
-endif()
-
 target_link_libraries(${MODULE_NAME} PRIVATE ${LIBFREERDP_LIBS} winpr)
 
 install(TARGETS ${MODULE_NAME} COMPONENT libraries EXPORT FreeRDPTargets
@@ -420,7 +435,7 @@ SetFreeRDPCMakeInstallDir(FREERDP_CMAKE_INSTALL_DIR "FreeRDP${FREERDP_VERSION_MA
 
 configure_package_config_file(FreeRDPConfig.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/FreeRDPConfig.cmake
 INSTALL_DESTINATION ${FREERDP_CMAKE_INSTALL_DIR}
-PATH_VARS FREERDP_INCLUDE_DIR)
+PATH_VARS FREERDP_INCLUDE_DIR FREERDP_PLUGIN_PATH)
 
 write_basic_package_version_file(${CMAKE_CURRENT_BINARY_DIR}/FreeRDPConfigVersion.cmake
 VERSION ${FREERDP_VERSION} COMPATIBILITY SameMajorVersion)

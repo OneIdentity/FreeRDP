@@ -24,15 +24,76 @@
 #include <winpr/crypto.h>
 #include <winpr/print.h>
 
+#include <freerdp/server/proxy/proxy_log.h>
 #include <freerdp/server/proxy/proxy_server.h>
 
 #include "pf_client.h"
+#include "pf_utils.h"
+#include "proxy_modules.h"
+
 #include <freerdp/server/proxy/proxy_context.h>
+
+#include "channels/pf_channel_rdpdr.h"
+
+#define TAG PROXY_TAG("server")
+
+static UINT32 ChannelId_Hash(const void* key)
+{
+	const UINT32* v = (const UINT32*)key;
+	return *v;
+}
+
+static BOOL ChannelId_Compare(const UINT32* v1, const UINT32* v2)
+{
+	return (*v1 == *v2);
+}
+
+pServerStaticChannelContext* StaticChannelContext_new(pServerContext* ps, const char* name,
+                                                      UINT32 id)
+{
+	pServerStaticChannelContext* ret = calloc(1, sizeof(*ret));
+	if (!ret)
+	{
+		PROXY_LOG_ERR(TAG, ps, "error allocating channel context for '%s'", name);
+		return NULL;
+	}
+
+	ret->front_channel_id = id;
+	ret->channel_name = _strdup(name);
+	if (!ret->channel_name)
+	{
+		PROXY_LOG_ERR(TAG, ps, "error allocating name in channel context for '%s'", name);
+		free(ret);
+		return NULL;
+	}
+
+	proxyChannelToInterceptData channel = { .name = name, .channelId = id, .intercept = FALSE };
+
+	if (pf_modules_run_filter(ps->pdata->module, FILTER_TYPE_STATIC_INTERCEPT_LIST, ps->pdata,
+	                          &channel) &&
+	    channel.intercept)
+		ret->channelMode = PF_UTILS_CHANNEL_INTERCEPT;
+	else
+		ret->channelMode = pf_utils_get_channel_mode(ps->pdata->config, name);
+	return ret;
+}
+
+void StaticChannelContext_free(pServerStaticChannelContext* ctx)
+{
+	if (!ctx)
+		return;
+
+	IFCALL(ctx->contextDtor, ctx->context);
+
+	free(ctx->channel_name);
+	free(ctx);
+}
 
 /* Proxy context initialization callback */
 static void client_to_proxy_context_free(freerdp_peer* client, rdpContext* ctx);
 static BOOL client_to_proxy_context_new(freerdp_peer* client, rdpContext* ctx)
 {
+	wObject* obj;
 	pServerContext* context = (pServerContext*)ctx;
 
 	WINPR_ASSERT(client);
@@ -47,6 +108,37 @@ static BOOL client_to_proxy_context_new(freerdp_peer* client, rdpContext* ctx)
 
 	if (!(context->dynvcReady = CreateEvent(NULL, TRUE, FALSE, NULL)))
 		goto error;
+
+	context->interceptContextMap = HashTable_New(FALSE);
+	if (!context->interceptContextMap)
+		goto error;
+	if (!HashTable_SetupForStringData(context->interceptContextMap, FALSE))
+		goto error;
+	obj = HashTable_ValueObject(context->interceptContextMap);
+	WINPR_ASSERT(obj);
+	obj->fnObjectFree = intercept_context_entry_free;
+
+	/* channels by ids */
+	context->channelsByFrontId = HashTable_New(FALSE);
+	if (!context->channelsByFrontId)
+		goto error;
+	if (!HashTable_SetHashFunction(context->channelsByFrontId, ChannelId_Hash))
+		goto error;
+
+	obj = HashTable_KeyObject(context->channelsByFrontId);
+	obj->fnObjectEquals = (OBJECT_EQUALS_FN)ChannelId_Compare;
+
+	obj = HashTable_ValueObject(context->channelsByFrontId);
+	obj->fnObjectFree = (OBJECT_FREE_FN)StaticChannelContext_free;
+
+	context->channelsByBackId = HashTable_New(FALSE);
+	if (!context->channelsByBackId)
+		goto error;
+	if (!HashTable_SetHashFunction(context->channelsByBackId, ChannelId_Hash))
+		goto error;
+
+	obj = HashTable_KeyObject(context->channelsByBackId);
+	obj->fnObjectEquals = (OBJECT_EQUALS_FN)ChannelId_Compare;
 
 	return TRUE;
 
@@ -66,15 +158,19 @@ void client_to_proxy_context_free(freerdp_peer* client, rdpContext* ctx)
 	if (!context)
 		return;
 
-	if (context->vcm && (context->vcm != INVALID_HANDLE_VALUE))
-		WTSCloseServer((HANDLE)context->vcm);
-	context->vcm = NULL;
-
 	if (context->dynvcReady)
 	{
 		CloseHandle(context->dynvcReady);
 		context->dynvcReady = NULL;
 	}
+
+	HashTable_Free(context->interceptContextMap);
+	HashTable_Free(context->channelsByFrontId);
+	HashTable_Free(context->channelsByBackId);
+
+	if (context->vcm && (context->vcm != INVALID_HANDLE_VALUE))
+		WTSCloseServer((HANDLE)context->vcm);
+	context->vcm = NULL;
 }
 
 BOOL pf_context_init_server_context(freerdp_peer* client)
@@ -107,14 +203,21 @@ static BOOL pf_context_revert_str_settings(rdpSettings* dst, const rdpSettings* 
 	return TRUE;
 }
 
+void intercept_context_entry_free(void* obj)
+{
+	InterceptContextMapEntry* entry = obj;
+	if (!entry)
+		return;
+	if (!entry->free)
+		return;
+	entry->free(entry);
+}
+
 BOOL pf_context_copy_settings(rdpSettings* dst, const rdpSettings* src)
 {
 	BOOL rc = FALSE;
 	rdpSettings* before_copy;
-	const size_t to_revert[] = { FreeRDP_ConfigPath,      FreeRDP_PrivateKeyContent,
-		                         FreeRDP_RdpKeyContent,   FreeRDP_RdpKeyFile,
-		                         FreeRDP_PrivateKeyFile,  FreeRDP_CertificateFile,
-		                         FreeRDP_CertificateName, FreeRDP_CertificateContent };
+	const size_t to_revert[] = { FreeRDP_ConfigPath, FreeRDP_CertificateName };
 
 	if (!dst || !src)
 		return FALSE;
@@ -146,8 +249,7 @@ BOOL pf_context_copy_settings(rdpSettings* dst, const rdpSettings* src)
 		 * it must be freed before setting it to NULL to avoid a memory leak!
 		 */
 
-		if (!freerdp_settings_set_pointer_len(dst, FreeRDP_RdpServerRsaKey, NULL,
-		                                      sizeof(rdpRsaKey)))
+		if (!freerdp_settings_set_pointer_len(dst, FreeRDP_RdpServerRsaKey, NULL, 1))
 			goto out_fail;
 	}
 
@@ -159,7 +261,7 @@ out_fail:
 	return rc;
 }
 
-pClientContext* pf_context_create_client_context(rdpSettings* clientSettings)
+pClientContext* pf_context_create_client_context(const rdpSettings* clientSettings)
 {
 	RDP_CLIENT_ENTRY_POINTS clientEntryPoints;
 	pClientContext* pc;
@@ -269,7 +371,7 @@ void proxy_data_abort_connect(proxyData* pdata)
 	WINPR_ASSERT(pdata->abort_event);
 	SetEvent(pdata->abort_event);
 	if (pdata->pc)
-		freerdp_abort_connect(pdata->pc->context.instance);
+		freerdp_abort_connect_context(&pdata->pc->context);
 }
 
 BOOL proxy_data_shall_disconnect(proxyData* pdata)

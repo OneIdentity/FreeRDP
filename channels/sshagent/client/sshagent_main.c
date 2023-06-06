@@ -35,9 +35,7 @@
  *     xrdp-ssh-agent gets a separate DVC invocation.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -54,12 +52,14 @@
 #include <winpr/stream.h>
 
 #include "sshagent_main.h"
+
+#include <freerdp/freerdp.h>
+#include <freerdp/client/channels.h>
 #include <freerdp/channels/log.h>
 
 #define TAG CHANNELS_TAG("sshagent.client")
 
-typedef struct _SSHAGENT_LISTENER_CALLBACK SSHAGENT_LISTENER_CALLBACK;
-struct _SSHAGENT_LISTENER_CALLBACK
+typedef struct
 {
 	IWTSListenerCallback iface;
 
@@ -68,32 +68,26 @@ struct _SSHAGENT_LISTENER_CALLBACK
 
 	rdpContext* rdpcontext;
 	const char* agent_uds_path;
-};
+} SSHAGENT_LISTENER_CALLBACK;
 
-typedef struct _SSHAGENT_CHANNEL_CALLBACK SSHAGENT_CHANNEL_CALLBACK;
-struct _SSHAGENT_CHANNEL_CALLBACK
+typedef struct
 {
-	IWTSVirtualChannelCallback iface;
-
-	IWTSPlugin* plugin;
-	IWTSVirtualChannelManager* channel_mgr;
-	IWTSVirtualChannel* channel;
+	GENERIC_CHANNEL_CALLBACK generic;
 
 	rdpContext* rdpcontext;
 	int agent_fd;
 	HANDLE thread;
 	CRITICAL_SECTION lock;
-};
+} SSHAGENT_CHANNEL_CALLBACK;
 
-typedef struct _SSHAGENT_PLUGIN SSHAGENT_PLUGIN;
-struct _SSHAGENT_PLUGIN
+typedef struct
 {
 	IWTSPlugin iface;
 
 	SSHAGENT_LISTENER_CALLBACK* listener_callback;
 
 	rdpContext* rdpcontext;
-};
+} SSHAGENT_PLUGIN;
 
 /**
  * Function to open the connection to the sshagent
@@ -110,9 +104,7 @@ static int connect_to_sshagent(const char* udspath)
 		return -1;
 	}
 
-	struct sockaddr_un addr;
-
-	memset(&addr, 0, sizeof(addr));
+	struct sockaddr_un addr = { 0 };
 
 	addr.sun_family = AF_UNIX;
 
@@ -164,7 +156,8 @@ static DWORD WINAPI sshagent_read_thread(LPVOID data)
 		else
 		{
 			/* Something read: forward to virtual channel */
-			status = callback->channel->Write(callback->channel, bytes_read, buffer, NULL);
+			IWTSVirtualChannel* channel = callback->generic.channel;
+			status = channel->Write(channel, bytes_read, buffer, NULL);
 
 			if (status != CHANNEL_RC_OK)
 			{
@@ -258,6 +251,7 @@ static UINT sshagent_on_new_channel_connection(IWTSListenerCallback* pListenerCa
                                                IWTSVirtualChannelCallback** ppCallback)
 {
 	SSHAGENT_CHANNEL_CALLBACK* callback;
+	GENERIC_CHANNEL_CALLBACK* generic;
 	SSHAGENT_LISTENER_CALLBACK* listener_callback = (SSHAGENT_LISTENER_CALLBACK*)pListenerCallback;
 	callback = (SSHAGENT_CHANNEL_CALLBACK*)calloc(1, sizeof(SSHAGENT_CHANNEL_CALLBACK));
 
@@ -278,11 +272,12 @@ static UINT sshagent_on_new_channel_connection(IWTSListenerCallback* pListenerCa
 	}
 
 	InitializeCriticalSection(&callback->lock);
-	callback->iface.OnDataReceived = sshagent_on_data_received;
-	callback->iface.OnClose = sshagent_on_close;
-	callback->plugin = listener_callback->plugin;
-	callback->channel_mgr = listener_callback->channel_mgr;
-	callback->channel = pChannel;
+	generic = &callback->generic;
+	generic->iface.OnDataReceived = sshagent_on_data_received;
+	generic->iface.OnClose = sshagent_on_close;
+	generic->plugin = listener_callback->plugin;
+	generic->channel_mgr = listener_callback->channel_mgr;
+	generic->channel = pChannel;
 	callback->rdpcontext = listener_callback->rdpcontext;
 	callback->thread = CreateThread(NULL, 0, sshagent_read_thread, (void*)callback, 0, NULL);
 
@@ -345,18 +340,12 @@ static UINT sshagent_plugin_terminated(IWTSPlugin* pPlugin)
 	return CHANNEL_RC_OK;
 }
 
-#ifdef BUILTIN_CHANNELS
-#define DVCPluginEntry sshagent_DVCPluginEntry
-#else
-#define DVCPluginEntry FREERDP_API DVCPluginEntry
-#endif
-
 /**
  * Main entry point for sshagent DVC plugin
  *
  * @return 0 on success, otherwise a Win32 error code
  */
-UINT DVCPluginEntry(IDRDYNVC_ENTRY_POINTS* pEntryPoints)
+UINT sshagent_DVCPluginEntry(IDRDYNVC_ENTRY_POINTS* pEntryPoints)
 {
 	UINT status = CHANNEL_RC_OK;
 	SSHAGENT_PLUGIN* sshagent;
@@ -376,9 +365,7 @@ UINT DVCPluginEntry(IDRDYNVC_ENTRY_POINTS* pEntryPoints)
 		sshagent->iface.Connected = NULL;
 		sshagent->iface.Disconnected = NULL;
 		sshagent->iface.Terminated = sshagent_plugin_terminated;
-		sshagent->rdpcontext =
-		    ((freerdp*)((rdpSettings*)pEntryPoints->GetRdpSettings(pEntryPoints))->instance)
-		        ->context;
+		sshagent->rdpcontext = pEntryPoints->GetRdpContext(pEntryPoints);
 		status = pEntryPoints->RegisterPlugin(pEntryPoints, "sshagent", &sshagent->iface);
 	}
 

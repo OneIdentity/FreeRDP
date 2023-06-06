@@ -96,7 +96,6 @@ static UwacReturnCode set_cursor_image(UwacSeat* seat, uint32_t serial)
 	struct wl_cursor_image* image = NULL;
 	struct wl_surface* surface = NULL;
 	int32_t x = 0, y = 0;
-	int buffer_add_listener_success = -1;
 
 	if (!seat || !seat->display || !seat->default_cursor || !seat->default_cursor->images)
 		return UWAC_ERROR_INTERNAL;
@@ -108,6 +107,9 @@ static UwacReturnCode set_cursor_image(UwacSeat* seat, uint32_t serial)
 			buffer = create_pointer_buffer(seat, seat->pointer_data, seat->pointer_size);
 			if (!buffer)
 				return UWAC_ERROR_INTERNAL;
+			if (wl_buffer_add_listener(buffer, &buffer_release_listener, seat) < 0)
+				return UWAC_ERROR_INTERNAL;
+
 			surface = seat->pointer_surface;
 			x = image->hotspot_x;
 			y = image->hotspot_y;
@@ -130,15 +132,9 @@ static UwacReturnCode set_cursor_image(UwacSeat* seat, uint32_t serial)
 			break;
 	}
 
-	if (buffer)
+	if (surface && buffer)
 	{
-		buffer_add_listener_success =
-		    wl_buffer_add_listener(buffer, &buffer_release_listener, seat);
-	}
-
-	if (surface && buffer_add_listener_success > -1)
-	{
-		wl_surface_attach(surface, buffer, -x, -y);
+		wl_surface_attach(surface, buffer, 0, 0);
 		wl_surface_damage(surface, 0, 0, image->width, image->height);
 		wl_surface_commit(surface);
 	}
@@ -172,6 +168,7 @@ static void keyboard_repeat_func(UwacTask* task, uint32_t events)
 		key->sym = input->repeat_sym;
 		key->raw_key = input->repeat_key;
 		key->pressed = true;
+		key->repeated = true;
 	}
 }
 
@@ -422,6 +419,7 @@ static void keyboard_handle_key(void* data, struct wl_keyboard* keyboard, uint32
 	keyEvent->sym = sym;
 	keyEvent->raw_key = key;
 	keyEvent->pressed = (state == WL_KEYBOARD_KEY_STATE_PRESSED);
+	keyEvent->repeated = false;
 }
 
 static void keyboard_handle_modifiers(void* data, struct wl_keyboard* keyboard, uint32_t serial,
@@ -733,6 +731,7 @@ static void pointer_handle_enter(void* data, struct wl_pointer* pointer, uint32_
 	}
 
 	input->display->serial = serial;
+	input->display->pointer_focus_serial = serial;
 	window = wl_surface_get_user_data(surface);
 	if (window)
 		window->pointer_enter_serial = serial;
@@ -781,14 +780,16 @@ static void pointer_handle_motion(void* data, struct wl_pointer* pointer, uint32
 	UwacSeat* input = data;
 	UwacWindow* window = input->pointer_focus;
 
-	float sx = wl_fixed_to_double(sx_w);
-	float sy = wl_fixed_to_double(sy_w);
+	int sx_i = wl_fixed_to_int(sx_w);
+	int sy_i = wl_fixed_to_int(sy_w);
+	double sx_d = wl_fixed_to_double(sx_w);
+	double sy_d = wl_fixed_to_double(sy_w);
 
-	if (!window)
+	if (!window || (sx_i < 0) || (sy_i < 0))
 		return;
 
-	input->sx = sx;
-	input->sy = sy;
+	input->sx = sx_d;
+	input->sy = sy_d;
 
 	motion_event =
 	    (UwacPointerMotionEvent*)UwacDisplayNewEvent(input->display, UWAC_EVENT_POINTER_MOTION);
@@ -797,8 +798,8 @@ static void pointer_handle_motion(void* data, struct wl_pointer* pointer, uint32
 
 	motion_event->seat = input;
 	motion_event->window = window;
-	motion_event->x = wl_fixed_to_int(sx_w);
-	motion_event->y = wl_fixed_to_int(sy_w);
+	motion_event->x = sx_i;
+	motion_event->y = sy_i;
 }
 
 static void pointer_handle_button(void* data, struct wl_pointer* pointer, uint32_t serial,
@@ -1191,5 +1192,7 @@ UwacReturnCode UwacSeatSetMouseCursor(UwacSeat* seat, const void* data, size_t l
 	{
 		seat->pointer_type = 1;
 	}
-	return set_cursor_image(seat, seat->display->serial);
+	if (seat && !seat->default_cursor)
+		return UWAC_SUCCESS;
+	return set_cursor_image(seat, seat->display->pointer_focus_serial);
 }

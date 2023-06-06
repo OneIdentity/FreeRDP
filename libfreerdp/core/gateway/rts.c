@@ -17,14 +17,11 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <winpr/assert.h>
 #include <winpr/crt.h>
 #include <winpr/crypto.h>
-#include <winpr/winhttp.h>
 
 #include <freerdp/log.h>
 
@@ -180,14 +177,22 @@ static BOOL rts_write_common_pdu_header(wStream* s, const rpcconn_common_hdr_t* 
 	return TRUE;
 }
 
-BOOL rts_read_common_pdu_header(wStream* s, rpcconn_common_hdr_t* header)
+BOOL rts_read_common_pdu_header(wStream* s, rpcconn_common_hdr_t* header, BOOL ignoreErrors)
 {
-	size_t left;
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(header);
 
-	if (Stream_GetRemainingLength(s) < sizeof(rpcconn_common_hdr_t))
-		return FALSE;
+	if (!ignoreErrors)
+	{
+		if (!Stream_CheckAndLogRequiredLength(TAG, s, sizeof(rpcconn_common_hdr_t)))
+			return FALSE;
+	}
+	else
+	{
+		const size_t sz = Stream_GetRemainingLength(s);
+		if (sz < sizeof(rpcconn_common_hdr_t))
+			return FALSE;
+	}
 
 	Stream_Read_UINT8(s, header->rpc_vers);
 	Stream_Read_UINT8(s, header->rpc_vers_minor);
@@ -199,12 +204,25 @@ BOOL rts_read_common_pdu_header(wStream* s, rpcconn_common_hdr_t* header)
 	Stream_Read_UINT32(s, header->call_id);
 
 	if (header->frag_length < sizeof(rpcconn_common_hdr_t))
+	{
+		if (!ignoreErrors)
+			WLog_WARN(TAG, "Invalid header->frag_length of %" PRIu16 ", expected %" PRIuz,
+			          header->frag_length, sizeof(rpcconn_common_hdr_t));
 		return FALSE;
+	}
 
-	left = Stream_GetRemainingLength(s);
-	if (left < header->frag_length - sizeof(rpcconn_common_hdr_t))
-		return FALSE;
-
+	if (!ignoreErrors)
+	{
+		if (!Stream_CheckAndLogRequiredLength(TAG, s,
+		                                      header->frag_length - sizeof(rpcconn_common_hdr_t)))
+			return FALSE;
+	}
+	else
+	{
+		const size_t sz2 = Stream_GetRemainingLength(s);
+		if (sz2 < header->frag_length - sizeof(rpcconn_common_hdr_t))
+			return FALSE;
+	}
 	return TRUE;
 }
 
@@ -215,7 +233,7 @@ static BOOL rts_read_auth_verifier_no_checks(wStream* s, auth_verifier_co_t* aut
 	WINPR_ASSERT(auth);
 	WINPR_ASSERT(header);
 
-	WINPR_ASSERT(header->frag_length > header->auth_length);
+	WINPR_ASSERT(header->frag_length > header->auth_length + 8);
 
 	if (startPos)
 		*startPos = Stream_GetPosition(s);
@@ -225,7 +243,7 @@ static BOOL rts_read_auth_verifier_no_checks(wStream* s, auth_verifier_co_t* aut
 		const size_t expected = header->frag_length - header->auth_length - 8;
 
 		Stream_SetPosition(s, expected);
-		if (Stream_GetRemainingLength(s) < sizeof(auth_verifier_co_t))
+		if (!Stream_CheckAndLogRequiredLength(TAG, s, 8))
 			return FALSE;
 
 		Stream_Read_UINT8(s, auth->auth_type);
@@ -306,10 +324,15 @@ static BOOL rts_read_auth_verifier_with_stub(wStream* s, auth_verifier_co_t* aut
 
 	if (alloc_hint > 0)
 	{
-		const size_t size =
-		    header->frag_length - header->auth_length - 8 - auth->auth_pad_length - pos;
+		const size_t off = header->auth_length + 8 + auth->auth_pad_length + pos;
+		const size_t size = header->frag_length - MIN(header->frag_length, off);
 		const void* src = Stream_Buffer(s) + pos;
 
+		if (off > size)
+			WLog_WARN(TAG,
+			          "Unexpected alloc_hint(%" PRIuz ") for PDU %s: size %" PRIuz
+			          ", offset %" PRIuz,
+			          alloc_hint, rts_pdu_ptype_to_string(header->ptype), size, off);
 		*ptr = (BYTE*)sdup(src, size);
 		if (!*ptr)
 			return FALSE;
@@ -345,13 +368,15 @@ static BOOL rts_write_auth_verifier(wStream* s, const auth_verifier_co_t* auth,
 		Stream_Zero(s, auth_pad_length);
 	}
 
+#if defined(WITH_VERBOSE_WINPR_ASSERT) && (WITH_VERBOSE_WINPR_ASSERT != 0)
 	WINPR_ASSERT(header->frag_length + 8ull > header->auth_length);
 	{
-		size_t pos = Stream_GetPosition(s);
+		size_t apos = Stream_GetPosition(s);
 		size_t expected = header->frag_length - header->auth_length - 8;
 
-		WINPR_ASSERT(pos == expected);
+		WINPR_ASSERT(apos == expected);
 	}
+#endif
 
 	if (!Stream_EnsureRemainingCapacity(s, sizeof(auth_verifier_co_t)))
 		return FALSE;
@@ -373,14 +398,14 @@ static BOOL rts_read_version(wStream* s, p_rt_version_t* version)
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(version);
 
-	if (Stream_GetRemainingLength(s) < 2 * sizeof(UINT8))
+	if (!Stream_CheckAndLogRequiredLengthOfSize(TAG, s, 2, sizeof(UINT8)))
 		return FALSE;
 	Stream_Read_UINT8(s, version->major);
 	Stream_Read_UINT8(s, version->minor);
 	return TRUE;
 }
 
-void rts_free_supported_versions(p_rt_versions_supported_t* versions)
+static void rts_free_supported_versions(p_rt_versions_supported_t* versions)
 {
 	if (!versions)
 		return;
@@ -395,7 +420,7 @@ static BOOL rts_read_supported_versions(wStream* s, p_rt_versions_supported_t* v
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(versions);
 
-	if (Stream_GetRemainingLength(s) < sizeof(UINT8))
+	if (!Stream_CheckAndLogRequiredLength(TAG, s, sizeof(UINT8)))
 		return FALSE;
 
 	Stream_Read_UINT8(s, versions->n_protocols); /* count */
@@ -426,7 +451,7 @@ static BOOL rts_read_port_any(wStream* s, port_any_t* port)
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(port);
 
-	if (Stream_GetRemainingLength(s) < sizeof(UINT16))
+	if (!Stream_CheckAndLogRequiredLength(TAG, s, sizeof(UINT16)))
 		return FALSE;
 
 	Stream_Read_UINT16(s, port->length);
@@ -452,7 +477,7 @@ static BOOL rts_read_uuid(wStream* s, p_uuid_t* uuid)
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(uuid);
 
-	if (Stream_GetRemainingLength(s) < sizeof(p_uuid_t))
+	if (!Stream_CheckAndLogRequiredLength(TAG, s, sizeof(p_uuid_t)))
 		return FALSE;
 
 	Stream_Read_UINT32(s, uuid->time_low);
@@ -499,7 +524,7 @@ static BOOL rts_read_syntax_id(wStream* s, p_syntax_id_t* syntax_id)
 	if (!rts_read_uuid(s, &syntax_id->if_uuid))
 		return FALSE;
 
-	if (Stream_GetRemainingLength(s) < 4)
+	if (!Stream_CheckAndLogRequiredLength(TAG, s, 4))
 		return FALSE;
 
 	Stream_Read_UINT32(s, syntax_id->if_version);
@@ -521,13 +546,13 @@ static BOOL rts_write_syntax_id(wStream* s, const p_syntax_id_t* syntax_id)
 	return TRUE;
 }
 
-p_cont_elem_t* rts_context_elem_new(size_t count)
+static p_cont_elem_t* rts_context_elem_new(size_t count)
 {
 	p_cont_elem_t* ctx = calloc(count, sizeof(p_cont_elem_t));
 	return ctx;
 }
 
-void rts_context_elem_free(p_cont_elem_t* ptr)
+static void rts_context_elem_free(p_cont_elem_t* ptr)
 {
 	if (!ptr)
 		return;
@@ -541,7 +566,7 @@ static BOOL rts_read_context_elem(wStream* s, p_cont_elem_t* element)
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(element);
 
-	if (Stream_GetRemainingLength(s) < 4)
+	if (!Stream_CheckAndLogRequiredLength(TAG, s, 4))
 		return FALSE;
 
 	Stream_Read_UINT16(s, element->p_cont_id);
@@ -598,7 +623,7 @@ static BOOL rts_read_context_list(wStream* s, p_cont_list_t* list)
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(list);
 
-	if (Stream_GetRemainingLength(s) < 4)
+	if (!Stream_CheckAndLogRequiredLength(TAG, s, 4))
 		return FALSE;
 	Stream_Read_UINT8(s, list->n_context_elem); /* number of items */
 	Stream_Read_UINT8(s, list->reserved);       /* alignment pad, m.b.z. */
@@ -665,7 +690,7 @@ static BOOL rts_read_result(wStream* s, p_result_t* result)
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(result);
 
-	if (Stream_GetRemainingLength(s) < 2)
+	if (!Stream_CheckAndLogRequiredLength(TAG, s, 2))
 		return FALSE;
 	Stream_Read_UINT16(s, result->result);
 	Stream_Read_UINT16(s, result->reason);
@@ -686,7 +711,7 @@ static BOOL rts_read_result_list(wStream* s, p_result_list_t* list)
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(list);
 
-	if (Stream_GetRemainingLength(s) < 4)
+	if (!Stream_CheckAndLogRequiredLength(TAG, s, 4))
 		return FALSE;
 	Stream_Read_UINT8(s, list->n_results);  /* count */
 	Stream_Read_UINT8(s, list->reserved);   /* alignment pad, m.b.z. */
@@ -737,8 +762,8 @@ static BOOL rts_read_pdu_alter_context(wStream* s, rpcconn_alter_context_hdr_t* 
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(ctx);
 
-	if (Stream_GetRemainingLength(s) <
-	    sizeof(rpcconn_alter_context_hdr_t) - sizeof(rpcconn_common_hdr_t))
+	if (!Stream_CheckAndLogRequiredLength(
+	        TAG, s, sizeof(rpcconn_alter_context_hdr_t) - sizeof(rpcconn_common_hdr_t)))
 		return FALSE;
 
 	Stream_Read_UINT16(s, ctx->max_xmit_frag);
@@ -760,8 +785,8 @@ static BOOL rts_read_pdu_alter_context_response(wStream* s,
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(ctx);
 
-	if (Stream_GetRemainingLength(s) <
-	    sizeof(rpcconn_alter_context_response_hdr_t) - sizeof(rpcconn_common_hdr_t))
+	if (!Stream_CheckAndLogRequiredLength(
+	        TAG, s, sizeof(rpcconn_alter_context_response_hdr_t) - sizeof(rpcconn_common_hdr_t)))
 		return FALSE;
 	Stream_Read_UINT16(s, ctx->max_xmit_frag);
 	Stream_Read_UINT16(s, ctx->max_recv_frag);
@@ -797,7 +822,8 @@ static BOOL rts_read_pdu_bind(wStream* s, rpcconn_bind_hdr_t* ctx)
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(ctx);
 
-	if (Stream_GetRemainingLength(s) < sizeof(rpcconn_bind_hdr_t) - sizeof(rpcconn_common_hdr_t))
+	if (!Stream_CheckAndLogRequiredLength(
+	        TAG, s, sizeof(rpcconn_bind_hdr_t) - sizeof(rpcconn_common_hdr_t)))
 		return FALSE;
 	Stream_Read_UINT16(s, ctx->max_xmit_frag);
 	Stream_Read_UINT16(s, ctx->max_recv_frag);
@@ -825,8 +851,8 @@ static BOOL rts_read_pdu_bind_ack(wStream* s, rpcconn_bind_ack_hdr_t* ctx)
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(ctx);
 
-	if (Stream_GetRemainingLength(s) <
-	    sizeof(rpcconn_bind_ack_hdr_t) - sizeof(rpcconn_common_hdr_t))
+	if (!Stream_CheckAndLogRequiredLength(
+	        TAG, s, sizeof(rpcconn_bind_ack_hdr_t) - sizeof(rpcconn_common_hdr_t)))
 		return FALSE;
 	Stream_Read_UINT16(s, ctx->max_xmit_frag);
 	Stream_Read_UINT16(s, ctx->max_recv_frag);
@@ -858,8 +884,8 @@ static BOOL rts_read_pdu_bind_nak(wStream* s, rpcconn_bind_nak_hdr_t* ctx)
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(ctx);
 
-	if (Stream_GetRemainingLength(s) <
-	    sizeof(rpcconn_bind_nak_hdr_t) - sizeof(rpcconn_common_hdr_t))
+	if (!Stream_CheckAndLogRequiredLength(
+	        TAG, s, sizeof(rpcconn_bind_nak_hdr_t) - sizeof(rpcconn_common_hdr_t)))
 		return FALSE;
 	Stream_Read_UINT16(s, ctx->provider_reject_reason);
 	return rts_read_supported_versions(s, &ctx->versions);
@@ -878,8 +904,8 @@ static BOOL rts_read_pdu_auth3(wStream* s, rpcconn_rpc_auth_3_hdr_t* ctx)
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(ctx);
 
-	if (Stream_GetRemainingLength(s) <
-	    sizeof(rpcconn_rpc_auth_3_hdr_t) - sizeof(rpcconn_common_hdr_t))
+	if (!Stream_CheckAndLogRequiredLength(
+	        TAG, s, sizeof(rpcconn_rpc_auth_3_hdr_t) - sizeof(rpcconn_common_hdr_t)))
 		return FALSE;
 	Stream_Read_UINT16(s, ctx->max_xmit_frag);
 	Stream_Read_UINT16(s, ctx->max_recv_frag);
@@ -899,7 +925,7 @@ static BOOL rts_read_pdu_fault(wStream* s, rpcconn_fault_hdr_t* ctx)
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(ctx);
 
-	if (Stream_GetRemainingLength(s) < sizeof(rpcconn_fault_hdr_t) - sizeof(rpcconn_common_hdr_t))
+	if (!Stream_CheckAndLogRequiredLength(TAG, s, 12))
 		return FALSE;
 	Stream_Read_UINT32(s, ctx->alloc_hint);
 	Stream_Read_UINT16(s, ctx->p_cont_id);
@@ -907,6 +933,7 @@ static BOOL rts_read_pdu_fault(wStream* s, rpcconn_fault_hdr_t* ctx)
 	Stream_Read_UINT8(s, ctx->reserved);
 	Stream_Read_UINT32(s, ctx->status);
 
+	WLog_WARN(TAG, "status=%s", Win32ErrorCode2Tag(ctx->status));
 	return rts_read_auth_verifier_with_stub(s, &ctx->auth_verifier, &ctx->header);
 }
 
@@ -922,7 +949,8 @@ static BOOL rts_read_pdu_cancel_ack(wStream* s, rpcconn_cancel_hdr_t* ctx)
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(ctx);
 
-	if (Stream_GetRemainingLength(s) < sizeof(rpcconn_cancel_hdr_t) - sizeof(rpcconn_common_hdr_t))
+	if (!Stream_CheckAndLogRequiredLength(
+	        TAG, s, sizeof(rpcconn_cancel_hdr_t) - sizeof(rpcconn_common_hdr_t)))
 		return FALSE;
 	return rts_read_auth_verifier(s, &ctx->auth_verifier, &ctx->header);
 }
@@ -939,8 +967,8 @@ static BOOL rts_read_pdu_orphaned(wStream* s, rpcconn_orphaned_hdr_t* ctx)
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(ctx);
 
-	if (Stream_GetRemainingLength(s) <
-	    sizeof(rpcconn_orphaned_hdr_t) - sizeof(rpcconn_common_hdr_t))
+	if (!Stream_CheckAndLogRequiredLength(
+	        TAG, s, sizeof(rpcconn_orphaned_hdr_t) - sizeof(rpcconn_common_hdr_t)))
 		return FALSE;
 	return rts_read_auth_verifier(s, &ctx->auth_verifier, &ctx->header);
 }
@@ -957,7 +985,8 @@ static BOOL rts_read_pdu_request(wStream* s, rpcconn_request_hdr_t* ctx)
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(ctx);
 
-	if (Stream_GetRemainingLength(s) < sizeof(rpcconn_request_hdr_t) - sizeof(rpcconn_common_hdr_t))
+	if (!Stream_CheckAndLogRequiredLength(
+	        TAG, s, sizeof(rpcconn_request_hdr_t) - sizeof(rpcconn_common_hdr_t)))
 		return FALSE;
 	Stream_Read_UINT32(s, ctx->alloc_hint);
 	Stream_Read_UINT16(s, ctx->p_cont_id);
@@ -980,8 +1009,8 @@ static BOOL rts_read_pdu_response(wStream* s, rpcconn_response_hdr_t* ctx)
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(ctx);
 
-	if (Stream_GetRemainingLength(s) <
-	    sizeof(rpcconn_response_hdr_t) - sizeof(rpcconn_common_hdr_t))
+	if (!Stream_CheckAndLogRequiredLength(
+	        TAG, s, sizeof(rpcconn_response_hdr_t) - sizeof(rpcconn_common_hdr_t)))
 		return FALSE;
 	Stream_Read_UINT32(s, ctx->alloc_hint);
 	Stream_Read_UINT16(s, ctx->p_cont_id);
@@ -1007,7 +1036,8 @@ static BOOL rts_read_pdu_rts(wStream* s, rpcconn_rts_hdr_t* ctx)
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(ctx);
 
-	if (Stream_GetRemainingLength(s) < sizeof(rpcconn_rts_hdr_t) - sizeof(rpcconn_common_hdr_t))
+	if (!Stream_CheckAndLogRequiredLength(TAG, s,
+	                                      sizeof(rpcconn_rts_hdr_t) - sizeof(rpcconn_common_hdr_t)))
 		return FALSE;
 
 	Stream_Read_UINT16(s, ctx->Flags);
@@ -1090,7 +1120,7 @@ BOOL rts_read_pdu_header(wStream* s, rpcconn_hdr_t* header)
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(header);
 
-	if (!rts_read_common_pdu_header(s, &header->common))
+	if (!rts_read_common_pdu_header(s, &header->common, FALSE))
 		return FALSE;
 
 	WLog_DBG(TAG, "Reading PDU type %s", rts_pdu_ptype_to_string(header->common.ptype));
@@ -1176,7 +1206,7 @@ static int rts_receive_window_size_command_read(rdpRpc* rpc, wStream* buffer,
 	WINPR_ASSERT(rpc);
 	WINPR_ASSERT(buffer);
 
-	if (Stream_GetRemainingLength(buffer) < 4)
+	if (!Stream_CheckAndLogRequiredLength(TAG, buffer, 4))
 		return -1;
 	Stream_Read_UINT32(buffer, val);
 	if (ReceiveWindowSize)
@@ -1206,7 +1236,7 @@ static int rts_flow_control_ack_command_read(rdpRpc* rpc, wStream* buffer, UINT3
 	WINPR_ASSERT(buffer);
 
 	/* Ack (24 bytes) */
-	if (Stream_GetRemainingLength(buffer) < 24)
+	if (!Stream_CheckAndLogRequiredLength(TAG, buffer, 24))
 		return -1;
 
 	Stream_Read_UINT32(buffer, val);
@@ -1247,7 +1277,7 @@ static BOOL rts_connection_timeout_command_read(rdpRpc* rpc, wStream* buffer,
 	WINPR_ASSERT(rpc);
 	WINPR_ASSERT(buffer);
 
-	if (Stream_GetRemainingLength(buffer) < 4)
+	if (!Stream_CheckAndLogRequiredLength(TAG, buffer, 4))
 		return FALSE;
 
 	Stream_Read_UINT32(buffer, val);
@@ -1316,7 +1346,7 @@ static BOOL rts_version_command_write(wStream* buffer)
 {
 	WINPR_ASSERT(buffer);
 
-	if (Stream_GetRemainingCapacity(buffer) < 8)
+	if (!Stream_CheckAndLogRequiredCapacity(TAG, (buffer), 8))
 		return FALSE;
 
 	Stream_Write_UINT32(buffer, RTS_CMD_VERSION); /* CommandType (4 bytes) */
@@ -1342,7 +1372,7 @@ static BOOL rts_padding_command_read(wStream* s, size_t* length)
 	UINT32 ConformanceCount;
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(length);
-	if (Stream_GetRemainingLength(s) < 4)
+	if (!Stream_CheckAndLogRequiredLength(TAG, s, 4))
 		return FALSE;
 	Stream_Read_UINT32(s, ConformanceCount); /* ConformanceCount (4 bytes) */
 	*length = ConformanceCount + 4;
@@ -1356,7 +1386,7 @@ static BOOL rts_client_address_command_read(wStream* s, size_t* length)
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(length);
 
-	if (Stream_GetRemainingLength(s) < 4)
+	if (!Stream_CheckAndLogRequiredLength(TAG, s, 4))
 		return FALSE;
 	Stream_Read_UINT32(s, AddressType); /* AddressType (4 bytes) */
 
@@ -1394,7 +1424,7 @@ static int rts_destination_command_read(rdpRpc* rpc, wStream* buffer, UINT32* De
 	WINPR_ASSERT(rpc);
 	WINPR_ASSERT(buffer);
 
-	if (Stream_GetRemainingLength(buffer) < 4)
+	if (!Stream_CheckAndLogRequiredLength(TAG, buffer, 4))
 		return -1;
 	Stream_Read_UINT32(buffer, val);
 	if (Destination)
@@ -1587,9 +1617,9 @@ fail:
 
 BOOL rts_recv_CONN_C2_pdu(rdpRpc* rpc, wStream* buffer)
 {
-	BOOL rc;
-	UINT32 ReceiveWindowSize;
-	UINT32 ConnectionTimeout;
+	BOOL rc = FALSE;
+	UINT32 ReceiveWindowSize = 0;
+	UINT32 ConnectionTimeout = 0;
 
 	WINPR_ASSERT(rpc);
 	WINPR_ASSERT(buffer);
@@ -1852,7 +1882,7 @@ BOOL rts_command_length(UINT32 CommandType, wStream* s, size_t* length)
 	}
 
 	CommandLength += padding;
-	if (Stream_GetRemainingLength(s) < CommandLength)
+	if (!Stream_CheckAndLogRequiredLength(TAG, s, CommandLength))
 		return FALSE;
 
 	if (length)

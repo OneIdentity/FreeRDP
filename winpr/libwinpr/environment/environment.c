@@ -19,9 +19,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <winpr/config.h>
 
 #include <winpr/crt.h>
 #include <winpr/platform.h>
@@ -35,7 +33,7 @@
 #include <winpr/crt.h>
 #include <winpr/platform.h>
 
-#ifdef HAVE_UNISTD_H
+#ifdef WINPR_HAVE_UNISTD_H
 #include <unistd.h>
 #endif
 
@@ -564,8 +562,8 @@ BOOL SetEnvironmentVariableEBA(LPSTR* envBlock, LPCSTR lpName, LPCSTR lpValue)
 
 	if (lpValue)
 	{
-		length = (strlen(lpName) + strlen(lpValue) + 2);      /* +2 because of = and \0 */
-		envstr = (char*)malloc(length + 1);                   /* +1 because of closing \0 */
+		length = (strlen(lpName) + strlen(lpValue) + 2); /* +2 because of = and \0 */
+		envstr = (char*)malloc(length + 1);              /* +1 because of closing \0 */
 
 		if (!envstr)
 			return FALSE;
@@ -643,3 +641,73 @@ char** EnvironmentBlockToEnvpA(LPCH lpszEnvironmentBlock)
 
 	return envp;
 }
+
+#ifdef _WIN32
+
+// https://devblogs.microsoft.com/oldnewthing/20100203-00/?p=15083
+#define WINPR_MAX_ENVIRONMENT_LENGTH 2048
+
+DWORD GetEnvironmentVariableX(const char* lpName, char* lpBuffer, DWORD nSize)
+{
+	DWORD result = 0;
+	DWORD nSizeW = 0;
+	LPWSTR lpNameW = NULL;
+	LPWSTR lpBufferW = NULL;
+	LPSTR lpBufferA = lpBuffer;
+
+	lpNameW = ConvertUtf8ToWCharAlloc(lpName, NULL);
+	if (!lpNameW)
+		goto cleanup;
+
+	if (!lpBuffer)
+	{
+		char lpBufferMaxA[WINPR_MAX_ENVIRONMENT_LENGTH] = { 0 };
+		WCHAR lpBufferMaxW[WINPR_MAX_ENVIRONMENT_LENGTH] = { 0 };
+		LPSTR lpTmpBuffer = lpBufferMaxA;
+
+		nSizeW = ARRAYSIZE(lpBufferMaxW);
+
+		result = GetEnvironmentVariableW(lpNameW, lpBufferMaxW, nSizeW);
+
+		SSIZE_T rc =
+		    ConvertWCharNToUtf8(lpBufferMaxW, nSizeW, lpTmpBuffer, ARRAYSIZE(lpBufferMaxA));
+		if ((rc < 0) || (rc >= UINT32_MAX))
+			goto cleanup;
+
+		result = (DWORD)rc + 1;
+	}
+	else
+	{
+		nSizeW = nSize;
+		lpBufferW = calloc(nSizeW + 1, sizeof(WCHAR));
+
+		if (!lpBufferW)
+			goto cleanup;
+
+		result = GetEnvironmentVariableW(lpNameW, lpBufferW, nSizeW);
+
+		if (result == 0)
+			goto cleanup;
+
+		SSIZE_T rc = ConvertWCharNToUtf8(lpBufferW, nSizeW, lpBufferA, nSize);
+		if ((rc < 0) || (rc > UINT32_MAX))
+			goto cleanup;
+
+		result = (DWORD)rc;
+	}
+
+cleanup:
+	free(lpBufferW);
+	free(lpNameW);
+
+	return result;
+}
+
+#else
+
+DWORD GetEnvironmentVariableX(const char* lpName, char* lpBuffer, DWORD nSize)
+{
+	return GetEnvironmentVariableA(lpName, lpBuffer, nSize);
+}
+
+#endif

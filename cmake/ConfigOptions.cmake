@@ -52,7 +52,7 @@ if(NOT WIN32)
 		"NOT WITH_VALGRIND_MEMCHECK; NOT WITH_SANITIZE_ADDRESS; NOT WITH_SANITIZE_MEMORY" OFF)
 else()
 	if(NOT UWP)
-		option(WITH_MEDIA_FOUNDATION "Enable H264 media foundation decoder." ON)
+		option(WITH_MEDIA_FOUNDATION "Enable H264 media foundation decoder." OFF)
 	endif()
 endif()
 
@@ -69,10 +69,9 @@ option(WITH_SAMPLE "Build sample code" OFF)
 
 option(WITH_CLIENT_COMMON "Build client common library" ON)
 CMAKE_DEPENDENT_OPTION(WITH_CLIENT "Build client binaries" ON "WITH_CLIENT_COMMON" OFF)
+CMAKE_DEPENDENT_OPTION(WITH_CLIENT_SDL "[experimental] Build SDL client " ON "WITH_CLIENT" OFF)
 
 option(WITH_SERVER "Build server binaries" OFF)
-
-option(BUILTIN_CHANNELS "Combine all channels into their respective base library" ON)
 
 option(WITH_CHANNELS "Build virtual channel plugins" ON)
 
@@ -108,6 +107,7 @@ endif()
 option(WITH_DEBUG_CAPABILITIES "Print capability negotiation debug messages." ${DEFAULT_DEBUG_OPTION})
 option(WITH_DEBUG_CHANNELS "Print channel manager debug messages." ${DEFAULT_DEBUG_OPTION})
 option(WITH_DEBUG_CLIPRDR "Print clipboard redirection debug messages" ${DEFAULT_DEBUG_OPTION})
+option(WITH_DEBUG_CODECS "Print codec debug messages" ${DEFAULT_DEBUG_OPTION})
 option(WITH_DEBUG_RDPGFX "Print RDPGFX debug messages" ${DEFAULT_DEBUG_OPTION})
 option(WITH_DEBUG_DVC "Print dynamic virtual channel debug messages." ${DEFAULT_DEBUG_OPTION})
 CMAKE_DEPENDENT_OPTION(WITH_DEBUG_TSMF "Print TSMF virtual channel debug messages." ${DEFAULT_DEBUG_OPTION} "CHANNEL_TSMF" OFF)
@@ -140,7 +140,6 @@ option(WITH_DEBUG_SVC "Print static virtual channel debug messages." ${DEFAULT_D
 option(WITH_DEBUG_TRANSPORT "Print transport debug messages." ${DEFAULT_DEBUG_OPTION})
 option(WITH_DEBUG_TIMEZONE "Print timezone debug messages." ${DEFAULT_DEBUG_OPTION})
 option(WITH_DEBUG_WND "Print window order debug messages" ${DEFAULT_DEBUG_OPTION})
-option(WITH_DEBUG_X11_CLIPRDR "Print X11 clipboard redirection debug messages" ${DEFAULT_DEBUG_OPTION})
 option(WITH_DEBUG_X11_LOCAL_MOVESIZE "Print X11 Client local movesize debug messages" ${DEFAULT_DEBUG_OPTION})
 option(WITH_DEBUG_X11 "Print X11 Client debug messages" ${DEFAULT_DEBUG_OPTION})
 option(WITH_DEBUG_XV "Print XVideo debug messages" ${DEFAULT_DEBUG_OPTION})
@@ -149,15 +148,18 @@ option(WITH_DEBUG_RINGBUFFER "Enable Ringbuffer debug messages" ${DEFAULT_DEBUG_
 option(WITH_DEBUG_SYMBOLS "Pack debug symbols to installer" OFF)
 option(WITH_CCACHE "Use ccache support if available" ON)
 option(WITH_CLANG_FORMAT "Detect clang-format. run 'cmake --build . --target clangformat' to format." ON)
-option(WITH_GSSAPI "Compile support for kerberos authentication. (EXPERIMENTAL)" OFF)
 
 option(WITH_DSP_EXPERIMENTAL "Enable experimental sound encoder/decoder formats" OFF)
-if (WITH_FFMPEG)
-    option(WITH_DSP_FFMPEG "Use FFMPEG for audio encoding/decoding" OFF)
-    option(WITH_VAAPI "Use FFMPEG VAAPI" OFF)
-endif(WITH_FFMPEG)
 
-option(USE_VERSION_FROM_GIT_TAG "Extract FreeRDP version from git tag." OFF)
+option(WITH_FFMPEG "Enable FFMPEG for audio/video encoding/decoding" OFF)
+CMAKE_DEPENDENT_OPTION(WITH_DSP_FFMPEG "Use FFMPEG for audio encoding/decoding" OFF
+	"WITH_FFMPEG" OFF)
+CMAKE_DEPENDENT_OPTION(WITH_VIDEO_FFMPEG "Use FFMPEG for video encoding/decoding" ON
+	"WITH_FFMPEG" OFF)
+CMAKE_DEPENDENT_OPTION(WITH_VAAPI "Use FFMPEG VAAPI" OFF
+	"WITH_VIDEO_FFMPEG" OFF)
+
+option(USE_VERSION_FROM_GIT_TAG "Extract FreeRDP version from git tag." ON)
 
 option(WITH_CAIRO    "Use CAIRO image library for screen resizing" OFF)
 option(WITH_SWSCALE  "Use SWScale image library for screen resizing" OFF)
@@ -174,7 +176,9 @@ option(BUILD_FUZZERS "Use BUILD_FUZZERS to build fuzzing tests" OFF)
 
 if (BUILD_FUZZERS)
     if (NOT OSS_FUZZ)
-        add_compile_flags("C;CXX" -fsanitize=fuzzer-no-link)
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=fuzzer-no-link")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=fuzzer-no-link")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=fuzzer-no-link")
     endif ()
 
     if (OSS_FUZZ AND NOT DEFINED ENV{LIB_FUZZING_ENGINE})
@@ -194,6 +198,11 @@ if (BUILD_FUZZERS)
     endif ()
 
     set(BUILD_TESTING ON)
+
+    if (BUILD_SHARED_LIBS STREQUAL "OFF")
+        set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
+        set(CMAKE_CXX_FLAGS "-static ${CMAKE_CXX_FLAGS}")
+    endif()
 
     # A special target with fuzzer and sanitizer flags.
     add_library(fuzzer_config INTERFACE)

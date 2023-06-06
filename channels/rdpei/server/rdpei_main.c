@@ -20,9 +20,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <winpr/crt.h>
 #include <winpr/print.h>
@@ -33,7 +31,6 @@
 #include <freerdp/channels/rdpei.h>
 #include <freerdp/server/rdpei.h>
 
-/** @brief */
 enum RdpEiState
 {
 	STATE_INITIAL,
@@ -42,7 +39,7 @@ enum RdpEiState
 	STATE_SUSPENDED,
 };
 
-struct _rdpei_server_private
+struct s_rdpei_server_private
 {
 	HANDLE channelHandle;
 	HANDLE eventHandle;
@@ -99,6 +96,8 @@ UINT rdpei_server_init(RdpeiServerContext* context)
 	void* buffer = NULL;
 	DWORD bytesReturned;
 	RdpeiServerPrivate* priv = context->priv;
+	UINT32 channelId;
+	BOOL status = TRUE;
 
 	priv->channelHandle = WTSVirtualChannelOpenEx(WTS_CURRENT_SESSION, RDPEI_DVC_CHANNEL_NAME,
 	                                              WTS_CHANNEL_OPTION_DYNAMIC);
@@ -106,6 +105,15 @@ UINT rdpei_server_init(RdpeiServerContext* context)
 	{
 		WLog_ERR(TAG, "WTSVirtualChannelOpenEx failed!");
 		return CHANNEL_RC_INITIALIZATION_ERROR;
+	}
+
+	channelId = WTSChannelGetIdByHandle(priv->channelHandle);
+
+	IFCALLRET(context->onChannelIdAssigned, status, context, channelId);
+	if (!status)
+	{
+		WLog_ERR(TAG, "context->onChannelIdAssigned failed!");
+		goto out_close;
 	}
 
 	if (!WTSVirtualChannelQuery(priv->channelHandle, WTSVirtualEventHandle, &buffer,
@@ -170,11 +178,8 @@ HANDLE rdpei_server_get_event_handle(RdpeiServerContext* context)
 static UINT read_cs_ready_message(RdpeiServerContext* context, wStream* s)
 {
 	UINT error = CHANNEL_RC_OK;
-	if (Stream_GetRemainingLength(s) < 10)
-	{
-		WLog_ERR(TAG, "Not enough data!");
+	if (!Stream_CheckAndLogRequiredLength(TAG, s, 10))
 		return ERROR_INVALID_DATA;
-	}
 
 	Stream_Read_UINT32(s, context->protocolFlags);
 	Stream_Read_UINT32(s, context->clientVersion);
@@ -208,11 +213,8 @@ static UINT read_touch_contact_data(RdpeiServerContext* context, wStream* s,
                                     RDPINPUT_CONTACT_DATA* contactData)
 {
 	WINPR_UNUSED(context);
-	if (Stream_GetRemainingLength(s) < 1)
-	{
-		WLog_ERR(TAG, "Not enough data!");
+	if (!Stream_CheckAndLogRequiredLength(TAG, s, 1))
 		return ERROR_INVALID_DATA;
-	}
 
 	Stream_Read_UINT8(s, contactData->contactId);
 	if (!rdpei_read_2byte_unsigned(s, &contactData->fieldsPresent) ||
@@ -257,11 +259,8 @@ static UINT read_pen_contact(RdpeiServerContext* context, wStream* s,
                              RDPINPUT_PEN_CONTACT* contactData)
 {
 	WINPR_UNUSED(context);
-	if (Stream_GetRemainingLength(s) < 1)
-	{
-		WLog_ERR(TAG, "Not enough data!");
+	if (!Stream_CheckAndLogRequiredLength(TAG, s, 1))
 		return ERROR_INVALID_DATA;
-	}
 
 	Stream_Read_UINT8(s, contactData->deviceId);
 	if (!rdpei_read_2byte_unsigned(s, &contactData->fieldsPresent) ||
@@ -353,7 +352,7 @@ static UINT read_pen_frame(RdpeiServerContext* context, wStream* s, RDPINPUT_PEN
 		return ERROR_INTERNAL_ERROR;
 	}
 
-	frame->contacts = contact = calloc(frame->contactCount, sizeof(RDPINPUT_CONTACT_DATA));
+	frame->contacts = contact = calloc(frame->contactCount, sizeof(RDPINPUT_PEN_CONTACT));
 	if (!frame->contacts)
 	{
 		WLog_ERR(TAG, "calloc failed!");
@@ -472,11 +471,8 @@ static UINT read_dismiss_hovering_contact(RdpeiServerContext* context, wStream* 
 	BYTE contactId;
 	UINT error = CHANNEL_RC_OK;
 
-	if (Stream_GetRemainingLength(s) < 1)
-	{
-		WLog_ERR(TAG, "Not enough data!");
+	if (!Stream_CheckAndLogRequiredLength(TAG, s, 1))
 		return ERROR_INVALID_DATA;
-	}
 
 	Stream_Read_UINT8(s, contactId);
 

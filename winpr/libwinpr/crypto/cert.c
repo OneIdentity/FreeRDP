@@ -17,9 +17,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <winpr/config.h>
 
 #include <winpr/crypto.h>
 
@@ -151,6 +149,7 @@
  */
 
 #include <winpr/crt.h>
+#include <winpr/wincrypt.h>
 
 #ifndef _WIN32
 

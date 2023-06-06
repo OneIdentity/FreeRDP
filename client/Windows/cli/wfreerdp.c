@@ -19,14 +19,11 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <winpr/windows.h>
 
 #include <winpr/crt.h>
-#include <winpr/credui.h>
 
 #include <freerdp/freerdp.h>
 #include <freerdp/constants.h>
@@ -39,6 +36,7 @@
 #include "../resource/resource.h"
 
 #include "wf_client.h"
+#include "wf_defaults.h"
 
 #include <shellapi.h>
 
@@ -97,6 +95,8 @@ INT WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 			goto out;
 	}
 
+	freerdp_client_warn_deprecated(argc, argv);
+
 	settings = context->settings;
 	wfc = (wfContext*)context;
 
@@ -104,12 +104,13 @@ INT WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 		goto out;
 
 	status = freerdp_client_settings_parse_command_line(settings, argc, argv, FALSE);
-
 	if (status)
 	{
 		ret = freerdp_client_settings_command_line_status_print(settings, status, argc, argv);
 		goto out;
 	}
+
+	AddDefaultSettings(settings);
 
 	if (freerdp_client_start(context) != 0)
 		goto out;

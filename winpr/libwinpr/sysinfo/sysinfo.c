@@ -18,9 +18,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <winpr/config.h>
 
 #include <winpr/sysinfo.h>
 #include <winpr/platform.h>
@@ -63,7 +61,7 @@
 #include <time.h>
 #include <sys/time.h>
 
-#ifdef HAVE_UNISTD_H
+#ifdef WINPR_HAVE_UNISTD_H
 #include <unistd.h>
 #endif
 
@@ -404,7 +402,11 @@ BOOL GetComputerNameW(LPWSTR lpBuffer, LPDWORD lpnSize)
 	rc = GetComputerNameA(buffer, lpnSize);
 
 	if (rc && (*lpnSize > 0))
-		ConvertToUnicode(CP_UTF8, 0, buffer, (int)*lpnSize, &lpBuffer, (int)*lpnSize);
+	{
+		const SSIZE_T res = ConvertUtf8NToWChar(buffer, *lpnSize, lpBuffer, *lpnSize);
+		rc = res > 0;
+	}
+
 	free(buffer);
 
 	return rc;
@@ -522,7 +524,10 @@ BOOL GetComputerNameExW(COMPUTER_NAME_FORMAT NameType, LPWSTR lpBuffer, LPDWORD 
 	rc = GetComputerNameExA(NameType, lpABuffer, lpnSize);
 
 	if (rc && (*lpnSize > 0))
-		ConvertToUnicode(CP_UTF8, 0, lpABuffer, *lpnSize, &lpBuffer, *lpnSize);
+	{
+		const SSIZE_T res = ConvertUtf8NToWChar(lpABuffer, *lpnSize, lpBuffer, *lpnSize);
+		rc = res > 0;
+	}
 
 	free(lpABuffer);
 	return rc;
@@ -576,11 +581,20 @@ ULONGLONG winpr_GetTickCount64(void)
 /* If x86 */
 #ifdef _M_IX86_AMD64
 
-#if defined(__GNUC__) && defined(__AVX__)
+#if defined(__GNUC__)
 #define xgetbv(_func_, _lo_, _hi_) \
 	__asm__ __volatile__("xgetbv" : "=a"(_lo_), "=d"(_hi_) : "c"(_func_))
+#elif defined(_MSC_VER)
+#define xgetbv(_func_, _lo_, _hi_)              \
+	{                                           \
+		unsigned __int64 val = _xgetbv(_func_); \
+		_lo_ = val & 0xFFFFFFFF;                \
+		_hi_ = (val >> 32);                     \
+	}
 #endif
 
+#define B_BIT_AVX2 (1 << 5)
+#define B_BIT_AVX512F (1 << 16)
 #define D_BIT_MMX (1 << 23)
 #define D_BIT_SSE (1 << 25)
 #define D_BIT_SSE2 (1 << 26)
@@ -597,7 +611,6 @@ ULONGLONG winpr_GetTickCount64(void)
 #define C_BIT_AES (1 << 25)
 #define C_BIT_XGETBV (1 << 27)
 #define C_BIT_AVX (1 << 28)
-#define C_BITS_AVX (C_BIT_XGETBV | C_BIT_AVX)
 #define E_BIT_XMM (1 << 1)
 #define E_BIT_YMM (1 << 2)
 #define E_BITS_AVX (E_BIT_XMM | E_BIT_YMM)
@@ -620,7 +633,7 @@ static void cpuid(unsigned info, unsigned* eax, unsigned* ebx, unsigned* ecx, un
 	    "xchg %%rbx, %%rsi;"
 #endif
 	    : "=a"(*eax), "=S"(*ebx), "=c"(*ecx), "=d"(*edx)
-	    : "0"(info));
+	    : "a"(info), "c"(0));
 #elif defined(_MSC_VER)
 	int a[4];
 	__cpuid(a, info);
@@ -935,15 +948,21 @@ BOOL IsProcessorFeaturePresentEx(DWORD ProcessorFeature)
 				ret = TRUE;
 
 			break;
-#if defined(__GNUC__) && defined(__AVX__)
+#if defined(__GNUC__) || defined(_MSC_VER)
 
 		case PF_EX_AVX:
+		case PF_EX_AVX2:
+		case PF_EX_AVX512F:
 		case PF_EX_FMA:
 		case PF_EX_AVX_AES:
 		case PF_EX_AVX_PCLMULQDQ:
 		{
 			/* Check for general AVX support */
-			if ((c & C_BITS_AVX) != C_BITS_AVX)
+			if (!(c & C_BIT_AVX))
+				break;
+
+			/* Check for xgetbv support */
+			if (!(c & C_BIT_XGETBV))
 				break;
 
 			int e, f;
@@ -956,6 +975,26 @@ BOOL IsProcessorFeaturePresentEx(DWORD ProcessorFeature)
 				{
 					case PF_EX_AVX:
 						ret = TRUE;
+						break;
+
+					case PF_EX_AVX2:
+					case PF_EX_AVX512F:
+						cpuid(7, &a, &b, &c, &d);
+						switch (ProcessorFeature)
+						{
+							case PF_EX_AVX2:
+								if (b & B_BIT_AVX2)
+									ret = TRUE;
+								break;
+
+							case PF_EX_AVX512F:
+								if (b & B_BIT_AVX512F)
+									ret = TRUE;
+								break;
+
+							default:
+								break;
+						}
 						break;
 
 					case PF_EX_FMA:
@@ -979,7 +1018,7 @@ BOOL IsProcessorFeaturePresentEx(DWORD ProcessorFeature)
 			}
 		}
 		break;
-#endif //__AVX__
+#endif // __GNUC__ || _MSC_VER
 
 		default:
 			break;

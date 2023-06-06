@@ -19,9 +19,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -99,12 +97,14 @@ static void Ellipse_Bresenham(HGDI_DC hdc, int x1, int y1, int x2, int y2)
 
 /**
  * Draw an ellipse
- * @msdn{dd162510}
+ * msdn{dd162510}
+ *
  * @param hdc device context
  * @param nLeftRect x1
  * @param nTopRect y1
  * @param nRightRect x2
  * @param nBottomRect y2
+ *
  * @return nonzero if successful, 0 otherwise
  */
 BOOL gdi_Ellipse(HGDI_DC hdc, int nLeftRect, int nTopRect, int nRightRect, int nBottomRect)
@@ -114,11 +114,13 @@ BOOL gdi_Ellipse(HGDI_DC hdc, int nLeftRect, int nTopRect, int nRightRect, int n
 }
 
 /**
- * Fill a rectangle with the given brush.\n
- * @msdn{dd162719}
+ * Fill a rectangle with the given brush.
+ * msdn{dd162719}
+ *
  * @param hdc device context
  * @param rect rectangle
  * @param hbr brush
+ *
  * @return nonzero if successful, 0 otherwise
  */
 
@@ -149,11 +151,11 @@ BOOL gdi_FillRect(HGDI_DC hdc, const HGDI_RECT rect, HGDI_BRUSH hbr)
 				BYTE* dstp = gdi_get_bitmap_pointer(hdc, nXDest + x, nYDest);
 
 				if (dstp)
-					WriteColor(dstp, hdc->format, color);
+					FreeRDPWriteColor(dstp, hdc->format, color);
 			}
 
 			srcp = gdi_get_bitmap_pointer(hdc, nXDest, nYDest);
-			formatSize = GetBytesPerPixel(hdc->format);
+			formatSize = FreeRDPGetBytesPerPixel(hdc->format);
 
 			for (y = 1; y < nHeight; y++)
 			{
@@ -166,7 +168,7 @@ BOOL gdi_FillRect(HGDI_DC hdc, const HGDI_RECT rect, HGDI_BRUSH hbr)
 		case GDI_BS_HATCHED:
 		case GDI_BS_PATTERN:
 			monochrome = (hbr->pattern->format == PIXEL_FORMAT_MONO);
-			formatSize = GetBytesPerPixel(hbr->pattern->format);
+			formatSize = FreeRDPGetBytesPerPixel(hbr->pattern->format);
 
 			for (y = 0; y < nHeight; y++)
 			{
@@ -190,13 +192,13 @@ BOOL gdi_FillRect(HGDI_DC hdc, const HGDI_RECT rect, HGDI_BRUSH hbr)
 					}
 					else
 					{
-						dstColor = ReadColor(patp, hbr->pattern->format);
+						dstColor = FreeRDPReadColor(patp, hbr->pattern->format);
 						dstColor =
 						    FreeRDPConvertColor(dstColor, hbr->pattern->format, hdc->format, NULL);
 					}
 
 					if (dstp)
-						WriteColor(dstp, hdc->format, dstColor);
+						FreeRDPWriteColor(dstp, hdc->format, dstColor);
 				}
 			}
 
@@ -214,7 +216,7 @@ BOOL gdi_FillRect(HGDI_DC hdc, const HGDI_RECT rect, HGDI_BRUSH hbr)
 
 /**
  * Draw a polygon
- * @msdn{dd162814}
+ * msdn{dd162814}
  * @param hdc device context
  * @param lpPoints array of points
  * @param nCount number of points
@@ -228,7 +230,7 @@ BOOL gdi_Polygon(HGDI_DC hdc, GDI_POINT* lpPoints, int nCount)
 
 /**
  * Draw a series of closed polygons
- * @msdn{dd162818}
+ * msdn{dd162818}
  * @param hdc device context
  * @param lpPoints array of series of points
  * @param lpPolyCounts array of number of points in each series
@@ -257,10 +259,10 @@ BOOL gdi_Rectangle(HGDI_DC hdc, INT32 nXDst, INT32 nYDst, INT32 nWidth, INT32 nH
 		BYTE* dstRight = gdi_get_bitmap_pointer(hdc, nXDst + nWidth - 1, nYDst + y);
 
 		if (dstLeft)
-			WriteColor(dstLeft, hdc->format, color);
+			FreeRDPWriteColor(dstLeft, hdc->format, color);
 
 		if (dstRight)
-			WriteColor(dstRight, hdc->format, color);
+			FreeRDPWriteColor(dstRight, hdc->format, color);
 	}
 
 	for (x = 0; x < nWidth; x++)
@@ -269,10 +271,10 @@ BOOL gdi_Rectangle(HGDI_DC hdc, INT32 nXDst, INT32 nYDst, INT32 nWidth, INT32 nH
 		BYTE* dstBottom = gdi_get_bitmap_pointer(hdc, nXDst + x, nYDst + nHeight - 1);
 
 		if (dstTop)
-			WriteColor(dstTop, hdc->format, color);
+			FreeRDPWriteColor(dstTop, hdc->format, color);
 
 		if (dstBottom)
-			WriteColor(dstBottom, hdc->format, color);
+			FreeRDPWriteColor(dstBottom, hdc->format, color);
 	}
 
 	return FALSE;

@@ -154,7 +154,6 @@
     <string name="settings_remote_program">리모트 프로그램</string>
     <string name="settings_work_dir">작업 디렉터리</string>
     <string name="settings_async_channel">비동기 채널</string>
-    <string name="settings_async_input">비동기 입력</string>
     <string name="settings_async_update">비동기 갱신</string>
     <string name="settings_console_mode">콘솔 모드</string>
     <!-- App settings strings -->
@@ -168,6 +167,7 @@
     <string name="settings_ui_invert_scrolling">스크롤 뒤집기</string>
     <string name="settings_ui_auto_scroll_touchpointer">터치 포인터 자동 스크롤</string>
     <string name="settings_ui_ask_on_exit">종료할 때 다이얼로그 보이기</string>
+    <string name="settings_ui_use_back_as_altf4">뒤로 버튼을 Alt+F4로 사용</string>
     <string name="settings_cat_power">절전 기능</string>
     <string name="settings_cat_client">클라이언트</string>
     <string name="settings_power_disconnect_timeout">사용하지 않는 연결 종료</string>

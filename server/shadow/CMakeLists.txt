@@ -7,7 +7,7 @@
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+#	 http://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
@@ -58,6 +58,9 @@ if (NOT FREERDP_UNIFIED_BUILD)
 	find_package(rdtk 0 REQUIRED)
 	include_directories(${RDTK_INCLUDE_DIR})
 else()
+	if (NOT WITH_RDTK)
+		message(FATAL_ERROR "-DWITH_RDTK=ON is required for unified FreeRDP build with shadow server")
+	endif()
 	include_directories(${PROJECT_SOURCE_DIR}/rdtk/include)
 	include_directories(${PROJECT_BINARY_DIR}/rdtk/include)
 endif()
@@ -72,9 +75,9 @@ if (WIN32)
   set (RC_VERSION_FILE "${CMAKE_SHARED_LIBRARY_PREFIX}${MODULE_NAME}${FREERDP_API_VERSION}${CMAKE_SHARED_LIBRARY_SUFFIX}" )
 
   configure_file(
-    ${PROJECT_SOURCE_DIR}/cmake/WindowsDLLVersion.rc.in
-    ${CMAKE_CURRENT_BINARY_DIR}/version.rc
-    @ONLY)
+	${PROJECT_SOURCE_DIR}/cmake/WindowsDLLVersion.rc.in
+	${CMAKE_CURRENT_BINARY_DIR}/version.rc
+	@ONLY)
 
   set ( ${MODULE_PREFIX}_SRCS ${${MODULE_PREFIX}_SRCS} ${CMAKE_CURRENT_BINARY_DIR}/version.rc)
 endif()
@@ -95,9 +98,9 @@ if (WITH_LIBRARY_VERSIONING)
 endif()
 
 install(TARGETS ${MODULE_NAME} COMPONENT server EXPORT FreeRDP-ShadowTargets
-        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+		ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+		LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+		RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 if (WITH_DEBUG_SYMBOLS AND MSVC)
 	get_target_property(OUTPUT_FILENAME ${MODULE_NAME} OUTPUT_NAME)
@@ -129,9 +132,9 @@ if (WIN32)
   set (RC_VERSION_FILE "${MODULE_NAME}${CMAKE_EXECUTABLE_SUFFIX}" )
 
   configure_file(
-    ${PROJECT_SOURCE_DIR}/cmake/WindowsDLLVersion.rc.in
-    ${CMAKE_CURRENT_BINARY_DIR}/version.rc
-    @ONLY)
+	${PROJECT_SOURCE_DIR}/cmake/WindowsDLLVersion.rc.in
+	${CMAKE_CURRENT_BINARY_DIR}/version.rc
+	@ONLY)
 
   set ( ${MODULE_PREFIX}_SRCS ${${MODULE_PREFIX}_SRCS} ${CMAKE_CURRENT_BINARY_DIR}/version.rc)
 endif()
@@ -153,100 +156,59 @@ if(WITH_SHADOW_X11 OR WITH_SHADOW_MAC)
 endif()
 
 if(WITH_SHADOW_X11)
-	set(XEXT_FEATURE_TYPE "RECOMMENDED")
-	set(XEXT_FEATURE_PURPOSE "X11 extension")
-	set(XEXT_FEATURE_DESCRIPTION "X11 core extensions")
-
-	set(XSHM_FEATURE_TYPE "RECOMMENDED")
-	set(XSHM_FEATURE_PURPOSE "X11 shared memory")
-	set(XSHM_FEATURE_DESCRIPTION "X11 shared memory extension")
-
-	set(XINERAMA_FEATURE_TYPE "RECOMMENDED")
-	set(XINERAMA_FEATURE_PURPOSE "multi-monitor")
-	set(XINERAMA_FEATURE_DESCRIPTION "X11 multi-monitor extension")
-
-	set(XTEST_FEATURE_TYPE "RECOMMENDED")
-	set(XTEST_FEATURE_PURPOSE "X11 input event injection")
-	set(XTEST_FEATURE_DESCRIPTION "X11 input event injection extension")
-
-	set(XCURSOR_FEATURE_TYPE "RECOMMENDED")
-	set(XCURSOR_FEATURE_PURPOSE "cursor")
-	set(XCURSOR_FEATURE_DESCRIPTION "X11 cursor extension")
-
-	set(XFIXES_FEATURE_TYPE "RECOMMENDED")
-	set(XFIXES_FEATURE_PURPOSE "X11 region")
-	set(XFIXES_FEATURE_DESCRIPTION "X11 region fix extension")
-
-	set(XRANDR_FEATURE_TYPE "RECOMMENDED")
-	set(XRANDR_FEATURE_PURPOSE "X11 resize, rotate and reflect")
-	set(XRANDR_FEATURE_DESCRIPTION "X11 resize, rotate and reflect extension")
-
-	set(XDAMAGE_FEATURE_TYPE "RECOMMENDED")
-	set(XDAMAGE_FEATURE_PURPOSE "X11 region damage")
-	set(XDAMAGE_FEATURE_DESCRIPTION "X11 region damage extension")
-
-	find_feature(Xext ${XEXT_FEATURE_TYPE} ${XEXT_FEATURE_PURPOSE} ${XEXT_FEATURE_DESCRIPTION})
-	find_feature(XShm ${XSHM_FEATURE_TYPE} ${XSHM_FEATURE_PURPOSE} ${XSHM_FEATURE_DESCRIPTION})
-	find_feature(XTest ${XTEST_FEATURE_TYPE} ${XTEST_FEATURE_PURPOSE} ${XTEST_FEATURE_DESCRIPTION})
-	find_feature(Xfixes ${XFIXES_FEATURE_TYPE} ${XFIXES_FEATURE_PURPOSE} ${XFIXES_FEATURE_DESCRIPTION})
-	find_feature(Xdamage ${XDAMAGE_FEATURE_TYPE} ${XDAMAGE_FEATURE_PURPOSE} ${XDAMAGE_FEATURE_DESCRIPTION})
-	find_feature(Xinerama ${XINERAMA_FEATURE_TYPE} ${XINERAMA_FEATURE_PURPOSE} ${XINERAMA_FEATURE_DESCRIPTION})
-	find_feature(XRandR ${XRANDR_FEATURE_TYPE} ${XRANDR_FEATURE_PURPOSE} ${XRANDR_FEATURE_DESCRIPTION})
-	find_feature(Xcursor ${XCURSOR_FEATURE_TYPE} ${XCURSOR_FEATURE_PURPOSE} ${XCURSOR_FEATURE_DESCRIPTION})
-
-	if(WITH_X11)
+	find_package(X11 REQUIRED)
+	if(X11_FOUND)
 		add_definitions(-DWITH_X11)
-		include_directories(${X11_INCLUDE_DIRS})
+		include_directories(${X11_INCLUDE_DIR})
 		list(APPEND ${MODULE_PREFIX}_X11_LIBS ${X11_LIBRARIES})
 	endif()
 
-	if(WITH_XSHM)
+	if(X11_XShm_FOUND)
 		add_definitions(-DWITH_XSHM)
-		include_directories(${XSHM_INCLUDE_DIRS})
-		list(APPEND ${MODULE_PREFIX}_X11_LIBS ${XSHM_LIBRARIES})
+		include_directories(${X11_XShm_INCLUDE_PATH})
+		list(APPEND ${MODULE_PREFIX}_X11_LIBS ${X11_Xext_LIB})
 	endif()
 
-	if(WITH_XEXT)
+	if(X11_Xext_FOUND)
 		add_definitions(-DWITH_XEXT)
-		include_directories(${XEXT_INCLUDE_DIRS})
-		list(APPEND ${MODULE_PREFIX}_X11_LIBS ${XEXT_LIBRARIES})
+		list(APPEND ${MODULE_PREFIX}_X11_LIBS ${X11_Xext_LIB})
 	endif()
 
-	if(WITH_XINERAMA)
+	if(X11_Xinerama_FOUND)
 		add_definitions(-DWITH_XINERAMA)
-		include_directories(${XINERAMA_INCLUDE_DIRS})
-		list(APPEND ${MODULE_PREFIX}_X11_LIBS ${XINERAMA_LIBRARIES})
+		include_directories(${X11_Xinerama_INCLUDE_PATH})
+		list(APPEND ${MODULE_PREFIX}_X11_LIBS ${X11_Xinerama_LIB})
 	endif()
 
-	if(WITH_XDAMAGE)
+	if(X11_Xdamage_FOUND)
 		add_definitions(-DWITH_XDAMAGE)
-		include_directories(${XDAMAGE_INCLUDE_DIRS})
-		list(APPEND ${MODULE_PREFIX}_X11_LIBS ${XDAMAGE_LIBRARIES})
+		include_directories(${X11_Xdamage_INCLUDE_PATH})
+		list(APPEND ${MODULE_PREFIX}_X11_LIBS ${X11_Xdamage_LIB})
 	endif()
 
-	if(WITH_XFIXES)
+	if(X11_Xfixes_FOUND)
 		add_definitions(-DWITH_XFIXES)
-		include_directories(${XFIXES_INCLUDE_DIRS})
-		list(APPEND ${MODULE_PREFIX}_X11_LIBS ${XFIXES_LIBRARIES})
+		include_directories(${X11_Xfixes_INCLUDE_PATH})
+		list(APPEND ${MODULE_PREFIX}_X11_LIBS ${X11_Xfixes_LIB})
 	endif()
 
-	if(WITH_XTEST)
+	if(X11_XTest_FOUND)
 		add_definitions(-DWITH_XTEST)
-		include_directories(${XTEST_INCLUDE_DIRS})
-		list(APPEND ${MODULE_PREFIX}_X11_LIBS ${XTEST_LIBRARIES})
+		include_directories(${X11_XTest_INCLUDE_PATH})
+		list(APPEND ${MODULE_PREFIX}_X11_LIBS ${X11_XTest_LIB})
 	endif()
 
 	# XCursor and XRandr are currently not used so don't link them
-	#if(WITH_XCURSOR)
+	#if(X11_Xcursor_FOUND)
 	#	add_definitions(-DWITH_XCURSOR)
-	#	include_directories(${XCURSOR_INCLUDE_DIRS})
-	#	list(APPEND ${MODULE_PREFIX}_X11_LIBS ${XCURSOR_LIBRARIES})
+	#	include_directories(${X11_Xcursor_INCLUDE_PATH})
+	#	list(APPEND ${MODULE_PREFIX}_X11_LIBS ${X11_Xcursor_LIB})
 	#endif()
 
-	#if(WITH_XRANDR)
+	#if(X11_Xrandr_FOUND)
 	#	add_definitions(-DWITH_XRANDR)
-	#	include_directories(${XRANDR_INCLUDE_DIRS})
-	#	list(APPEND ${MODULE_PREFIX}_X11_LIBS ${XRANDR_LIBRARIES})
+	#	include_directories(${X11_Xrandr_INCLUDE_PATH})
+	#	list(APPEND ${MODULE_PREFIX}_X11_LIBS ${X11_Xrandr_LIB})
 	#endif()
 elseif(WITH_SHADOW_MAC)
 	find_library(IOKIT IOKit)
@@ -293,7 +255,7 @@ list(APPEND ${MODULE_PREFIX}_LIBS ${${MODULE_PREFIX}_AUTH_LIBS})
 
 add_library(${MODULE_NAME} ${${MODULE_PREFIX}_SRCS})
 
-set(${MODULE_PREFIX}_LIBS ${${MODULE_PREFIX}_LIBS} freerdp-shadow freerdp winpr)
+list(APPEND ${MODULE_PREFIX}_LIBS freerdp-shadow freerdp winpr)
 
 target_link_libraries(${MODULE_NAME} PRIVATE ${${MODULE_PREFIX}_LIBS})
 
@@ -303,9 +265,9 @@ if (WITH_LIBRARY_VERSIONING)
 endif()
 
 install(TARGETS ${MODULE_NAME} COMPONENT server EXPORT FreeRDP-ShadowTargets
-        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+		ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+		LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+		RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 if (WITH_DEBUG_SYMBOLS AND MSVC)
 	get_target_property(OUTPUT_FILENAME ${MODULE_NAME} OUTPUT_NAME)
@@ -332,16 +294,16 @@ if (WIN32)
   set (RC_VERSION_FILE "${MODULE_NAME}${CMAKE_EXECUTABLE_SUFFIX}" )
 
   configure_file(
-    ${PROJECT_SOURCE_DIR}/cmake/WindowsDLLVersion.rc.in
-    ${CMAKE_CURRENT_BINARY_DIR}/version.rc
-    @ONLY)
+	${PROJECT_SOURCE_DIR}/cmake/WindowsDLLVersion.rc.in
+	${CMAKE_CURRENT_BINARY_DIR}/version.rc
+	@ONLY)
 
   set ( ${MODULE_PREFIX}_SRCS ${${MODULE_PREFIX}_SRCS} ${CMAKE_CURRENT_BINARY_DIR}/version.rc)
 endif()
 
 add_executable(${MODULE_NAME} ${${MODULE_PREFIX}_SRCS})
 
-set(${MODULE_PREFIX}_LIBS ${${MODULE_PREFIX}_LIBS} freerdp-shadow-subsystem freerdp-shadow freerdp winpr)
+list(APPEND ${MODULE_PREFIX}_LIBS freerdp-shadow-subsystem freerdp-shadow freerdp winpr)
 
 target_link_libraries(${MODULE_NAME} PRIVATE ${${MODULE_PREFIX}_LIBS})
 
@@ -370,9 +332,8 @@ configure_package_config_file(FreeRDP-ShadowConfig.cmake.in ${CMAKE_CURRENT_BINA
 write_basic_package_version_file(${CMAKE_CURRENT_BINARY_DIR}/FreeRDP-ShadowConfigVersion.cmake
 	VERSION ${FREERDP_VERSION} COMPATIBILITY SameMajorVersion)
 
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/FreeRDP-ShadowConfig.cmake ${CMAKE_CURRENT_BINARY_DIR}/FreeRDP-ShadowConfigVersion.cmake
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/FreeRDP-ShadowConfig.cmake
+    ${CMAKE_CURRENT_BINARY_DIR}/FreeRDP-ShadowConfigVersion.cmake
 	DESTINATION ${FREERDP_SERVER_CMAKE_INSTALL_DIR})
 
-if (NOT BUILTIN_CHANNELS)
-	install(EXPORT FreeRDP-ShadowTargets DESTINATION ${FREERDP_SERVER_CMAKE_INSTALL_DIR})
-endif()
+install(EXPORT FreeRDP-ShadowTargets DESTINATION ${FREERDP_SERVER_CMAKE_INSTALL_DIR})

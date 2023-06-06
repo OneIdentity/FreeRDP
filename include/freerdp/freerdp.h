@@ -22,47 +22,44 @@
 #ifndef FREERDP_H
 #define FREERDP_H
 
-typedef struct rdp_rdp rdpRdp;
-typedef struct rdp_gdi rdpGdi;
-typedef struct rdp_rail rdpRail;
-typedef struct rdp_cache rdpCache;
-typedef struct rdp_channels rdpChannels;
-typedef struct rdp_graphics rdpGraphics;
-typedef struct rdp_metrics rdpMetrics;
-typedef struct rdp_codecs rdpCodecs;
-typedef struct rdp_transport rdpTransport; /* Opaque */
-
-typedef struct rdp_freerdp freerdp;
-typedef struct rdp_context rdpContext;
-typedef struct rdp_freerdp_peer freerdp_peer;
-
-typedef struct rdp_client_context rdpClientContext;
-typedef struct rdp_client_entry_points_v1 RDP_CLIENT_ENTRY_POINTS_V1;
-typedef RDP_CLIENT_ENTRY_POINTS_V1 RDP_CLIENT_ENTRY_POINTS;
+#include <winpr/stream.h>
 
 #include <freerdp/api.h>
 #include <freerdp/types.h>
 #include <freerdp/error.h>
 #include <freerdp/event.h>
+
+#include <freerdp/settings.h>
+
+#include <freerdp/gdi/gdi.h>
 #include <freerdp/codecs.h>
 #include <freerdp/metrics.h>
-#include <freerdp/settings.h>
 #include <freerdp/extension.h>
-
-#include <winpr/stream.h>
-
-#include <freerdp/input.h>
-#include <freerdp/update.h>
+#include <freerdp/heartbeat.h>
 #include <freerdp/message.h>
 #include <freerdp/autodetect.h>
-#include <freerdp/heartbeat.h>
-
-typedef struct stream_dump_context rdpStreamDumpContext;
+#include <freerdp/streamdump.h>
 
 #ifdef __cplusplus
 extern "C"
 {
 #endif
+
+	typedef struct rdp_rdp rdpRdp;
+	typedef struct rdp_rail rdpRail;
+	typedef struct rdp_cache rdpCache;
+
+	typedef struct rdp_client_context rdpClientContext;
+	typedef struct rdp_client_entry_points_v1 RDP_CLIENT_ENTRY_POINTS_V1;
+	typedef RDP_CLIENT_ENTRY_POINTS_V1 RDP_CLIENT_ENTRY_POINTS;
+
+#include <freerdp/utils/smartcardlogon.h>
+#include <freerdp/update.h>
+#include <freerdp/input.h>
+#include <freerdp/graphics.h>
+
+#define MCS_BASE_CHANNEL_ID 1001
+#define MCS_GLOBAL_CHANNEL_ID 1003
 
 /* Flags used by certificate callbacks */
 #define VERIFY_CERT_FLAG_NONE 0x00
@@ -73,25 +70,6 @@ extern "C"
 #define VERIFY_CERT_FLAG_MISMATCH 0x80
 #define VERIFY_CERT_FLAG_MATCH_LEGACY_SHA1 0x100
 #define VERIFY_CERT_FLAG_FP_IS_PEM 0x200
-
-	typedef enum
-	{
-		CONNECTION_STATE_INITIAL,
-		CONNECTION_STATE_NEGO,
-		CONNECTION_STATE_NLA,
-		CONNECTION_STATE_MCS_CONNECT,
-		CONNECTION_STATE_MCS_ERECT_DOMAIN,
-		CONNECTION_STATE_MCS_ATTACH_USER,
-		CONNECTION_STATE_MCS_CHANNEL_JOIN,
-		CONNECTION_STATE_RDP_SECURITY_COMMENCEMENT,
-		CONNECTION_STATE_SECURE_SETTINGS_EXCHANGE,
-		CONNECTION_STATE_CONNECT_TIME_AUTO_DETECT,
-		CONNECTION_STATE_LICENSING,
-		CONNECTION_STATE_MULTITRANSPORT_BOOTSTRAPPING,
-		CONNECTION_STATE_CAPABILITIES_EXCHANGE,
-		CONNECTION_STATE_FINALIZATION,
-		CONNECTION_STATE_ACTIVE
-	} CONNECTION_STATE;
 
 /* Message types used by gateway messaging callback */
 #define GATEWAY_MESSAGE_CONSENT 1
@@ -104,19 +82,52 @@ extern "C"
 		AUTH_RDP,
 		GW_AUTH_HTTP,
 		GW_AUTH_RDG,
-		GW_AUTH_RPC
+		GW_AUTH_RPC,
+		AUTH_SMARTCARD_PIN
 	} rdp_auth_reason;
 
 	typedef BOOL (*pContextNew)(freerdp* instance, rdpContext* context);
 	typedef void (*pContextFree)(freerdp* instance, rdpContext* context);
 
-	typedef BOOL (*pPreConnect)(freerdp* instance);
-	typedef BOOL (*pPostConnect)(freerdp* instance);
+	typedef BOOL (*pConnectCallback)(freerdp* instance);
 	typedef void (*pPostDisconnect)(freerdp* instance);
+
+	/** \brief Authentication callback function pointer definition
+	 *
+	 * \param instance A pointer to the instance to work on
+	 * \param username A pointer to the username string. On input the current username, on output
+	 * the username that should be used. Must not be NULL. \param password A pointer to the password
+	 * string. On input the current password, on output the password that sohould be used. Must not
+	 * be NULL. \param domain A pointer to the domain string. On input the current domain, on output
+	 * the domain that sohould be used. Must not be NULL.
+	 *
+	 * \return \b FALSE no valid credentials supplied, continue without \b TRUE valid credentials
+	 * should be available.
+	 */
+
 	typedef BOOL (*pAuthenticate)(freerdp* instance, char** username, char** password,
 	                              char** domain);
+
+	/** \brief Extended authentication callback function pointer definition
+	 *
+	 * \param instance A pointer to the instance to work on
+	 * \param username A pointer to the username string. On input the current username, on output
+	 * the username that should be used. Must not be NULL. \param password A pointer to the password
+	 * string. On input the current password, on output the password that sohould be used. Must not
+	 * be NULL. \param domain A pointer to the domain string. On input the current domain, on output
+	 * the domain that sohould be used. Must not be NULL. \param reason The reason the callback was
+	 * called. (e.g. NLA, TLS, RDP, GATEWAY, ...)
+	 *
+	 * \return \b FALSE to abort the connection, \b TRUE otherwise.
+	 * \note To not provide valid credentials and not abort the connection return \b TRUE and empty
+	 * (as in empty string) credentials
+	 */
 	typedef BOOL (*pAuthenticateEx)(freerdp* instance, char** username, char** password,
 	                                char** domain, rdp_auth_reason reason);
+	typedef BOOL (*pChooseSmartcard)(freerdp* instance, SmartcardCertInfo** cert_list, DWORD count,
+	                                 DWORD* choice, BOOL gateway);
+	typedef BOOL (*pGetAadAuthCode)(freerdp* instance, const char* hostname, char** code,
+	                                const char** client_id, const char** redirect_uri);
 
 	/** @brief Callback used if user interaction is required to accept
 	 *         an unknown certificate.
@@ -300,13 +311,14 @@ extern "C"
 		ALIGN64 rdpMetrics* metrics;       /* 41 */
 		ALIGN64 rdpCodecs* codecs;         /* 42 */
 		ALIGN64 rdpAutoDetect* autodetect; /* 43 owned by rdpRdp */
-		ALIGN64 HANDLE abortEvent;         /* 44 */
+		UINT64 paddingC1[45 - 44];         /* 44 */
 		ALIGN64 int disconnectUltimatum;   /* 45 */
 		UINT64 paddingC[64 - 46];          /* 46 */
 
 		ALIGN64 rdpStreamDumpContext* dump; /* 64 */
+		ALIGN64 wLog* log;                  /* 65 */
 
-		UINT64 paddingD[96 - 65];  /* 65 */
+		UINT64 paddingD[96 - 66];  /* 66 */
 		UINT64 paddingE[128 - 96]; /* 96 */
 	};
 
@@ -350,24 +362,30 @@ extern "C"
 
 		UINT64 paddingA[16 - 2]; /* 2 */
 
-		ALIGN64 rdpInput* input;           /* (offset 16)
-		                              Input handle for the connection.
-		                                        Will be initialized by a call to freerdp_context_new()
-		             owned by rdpRdp */
-		ALIGN64 rdpUpdate* update;         /* (offset 17)
-		                              Update display parameters. Used to register display events callbacks
-		and settings.		 Will be initialized by a call to freerdp_context_new()		 owned by rdpRdp */
-		ALIGN64 rdpSettings* settings;     /**< (offset 18)
-		                                Pointer to a rdpSettings structure. Will be used to maintain the
-		                                required RDP	 settings.		              Will be
-		                                initialized by	 a call to freerdp_context_new()
-		                                owned by rdpRdp
-		                              */
-		ALIGN64 rdpAutoDetect* autodetect; /* (offset 19)
+#if defined(WITH_FREERDP_DEPRECATED)
+		WINPR_DEPRECATED_VAR("use rdpContext::input instead", ALIGN64 rdpInput* input;) /* (offset
+		                        16) Input handle for the connection. Will be initialized by a call
+		                        to freerdp_context_new() owned by rdpRdp */
+		WINPR_DEPRECATED_VAR("use rdpContext::update instead",
+		                     ALIGN64 rdpUpdate* update;) /* (offset 17)
+		                      Update display parameters. Used to register display events callbacks
+and settings.		 Will be initialized by a call to freerdp_context_new()		 owned by rdpRdp */
+		WINPR_DEPRECATED_VAR("use rdpContext::settings instead",
+		                     ALIGN64 rdpSettings* settings;) /**< (offset 18)
+		                            Pointer to a rdpSettings structure. Will be used to maintain the
+		                            required RDP	 settings.		              Will be
+		                            initialized by	 a call to freerdp_context_new()
+		                            owned by rdpRdp
+		                          */
+		WINPR_DEPRECATED_VAR("use rdpContext::autodetect instead",
+		                     ALIGN64 rdpAutoDetect* autodetect;) /* (offset 19)
 		                                Auto-Detect handle for the connection.
 		                                Will be initialized by a call to freerdp_context_new()
 owned by rdpRdp */
-		ALIGN64 rdpHeartbeat* heartbeat;   /* (offset 21) owned by rdpRdp*/
+#else
+	UINT64 paddingX[4];
+#endif
+		ALIGN64 rdpHeartbeat* heartbeat; /* (offset 21) owned by rdpRdp*/
 
 		UINT64 paddingB[32 - 21]; /* 21 */
 
@@ -397,36 +415,34 @@ owned by rdpRdp */
 
 		ALIGN64 UINT ConnectionCallbackState; /* 47 */
 
-		ALIGN64 pPreConnect
+		ALIGN64 pConnectCallback
 		    PreConnect; /**< (offset 48)
 		             Callback for pre-connect operations.
 		             Can be set before calling freerdp_connect() to have it executed before the
 		             actual connection happens. Must be set to NULL if not needed. */
 
-		ALIGN64 pPostConnect
+		ALIGN64 pConnectCallback
 		    PostConnect; /**< (offset 49)
 		              Callback for post-connect operations.
 		              Can be set before calling freerdp_connect() to have it executed after the
 		              actual connection has succeeded. Must be set to NULL if not needed. */
 
-		ALIGN64 pAuthenticate Authenticate;                         /**< (offset 50)
-		                                                         Callback for authentication.
-		                                                         It is used to get the username/password when it was not
-		                                                         provided at connection time. */
+		ALIGN64 pAuthenticate Authenticate; /**< (offset 50)
+		                                 Callback for authentication.
+		                                 It is used to get the username/password when it was not
+		                                 provided at connection time. */
 #if defined(WITH_FREERDP_DEPRECATED)
-		ALIGN64 pVerifyCertificate VerifyCertificate;               /**< (offset 51)
-    Callback for certificate validation.
-    Used to verify that an unknown certificate is
-trusted. DEPRECATED: Use VerifyChangedCertificateEx*/
-		ALIGN64 pVerifyChangedCertificate VerifyChangedCertificate; /**<
-(offset 52) Callback for changed certificate validation. Used when a certificate differs from stored
-fingerprint. DEPRECATED: Use VerifyChangedCertificateEx */
+		WINPR_DEPRECATED_VAR("Use VerifyCertificateEx or VerifyX509Certificate  instead",
+		                     ALIGN64 pVerifyCertificate VerifyCertificate;) /**< (offset 51) */
+		WINPR_DEPRECATED_VAR("Use VerifyChangedCertificateEx or VerifyX509Certificate  instead",
+		                     ALIGN64 pVerifyChangedCertificate
+		                         VerifyChangedCertificate;) /**< (offset 52) */
 #else
-	    ALIGN64 UINT64 reserved[2];
+	ALIGN64 UINT64 reserved[2];
 #endif
 		ALIGN64 pVerifyX509Certificate
-		    VerifyX509Certificate; /**< (offset 53)  Callback for X509 certificate verification (PEM
-		                              format) */
+		    VerifyX509Certificate; /**< (offset 53)  Callback for X509 certificate verification
+		                              (PEM format) */
 
 		ALIGN64 pLogonErrorInfo
 		    LogonErrorInfo; /**< (offset 54)  Callback for logon error info, important for logon
@@ -435,7 +451,11 @@ fingerprint. DEPRECATED: Use VerifyChangedCertificateEx */
 		ALIGN64 pPostDisconnect
 		    PostDisconnect; /**< (offset 55)
 		                                                                Callback for cleaning up
-		                       resources allocated by connect callbacks. */
+		                       resources allocated by post connect callback.
+
+		                       This will be called before disconnecting and cleaning up the
+		                       channels.
+ */
 
 		ALIGN64 pAuthenticate GatewayAuthenticate; /**< (offset 56)
 		                                 Callback for gateway authentication.
@@ -446,7 +466,25 @@ fingerprint. DEPRECATED: Use VerifyChangedCertificateEx */
 		                                  Callback for gateway consent messages.
 		                                  It is used to present consent messages to the user. */
 
-		UINT64 paddingD[64 - 58]; /* 58 */
+		ALIGN64 pConnectCallback Redirect; /**< (offset 58)
+		                                               Callback for redirect operations.
+		                                               Can be set after
+		             rdp_client_disconnect_and_clear and applying redirection settings but before
+		             rdp_client_connect() to have it executed after the actual connection has
+		             succeeded. Must be set to NULL if not needed. */
+		ALIGN64 pConnectCallback
+		    LoadChannels; /**< (offset 59)
+		                   * callback for loading channel configuration. Might be called multiple
+		                   * times when redirection occurs. */
+
+		ALIGN64 pPostDisconnect
+		    PostFinalDisconnect;  /** < (offset 60)
+		                           * callback for cleaning up resources allocated in PreConnect
+		                           *
+		                           * This will be called after all instance related channels and
+		                           * threads have been stopped
+		                           */
+		UINT64 paddingD[64 - 61]; /* 61 */
 
 		ALIGN64 pSendChannelData
 		    SendChannelData; /* (offset 64)
@@ -469,16 +507,24 @@ fingerprint. DEPRECATED: Use VerifyChangedCertificateEx */
 		                         Callback for changed certificate validation.
 		                         Used when a certificate differs from stored fingerprint. */
 		ALIGN64 pSendChannelPacket
-		    SendChannelPacket;    /* (offset 68)
-		                           * Callback for sending RAW data to a channel. In contrast to
-		                           * SendChannelData data fragmentation    is up to the user and this
-		                           * function sends data as is with the provided flags.
-		                           */
+		    SendChannelPacket;                  /* (offset 68)
+		                                         * Callback for sending RAW data to a channel. In contrast to
+		                                         * SendChannelData data fragmentation    is up to the user and this
+		                                         * function sends data as is with the provided flags.
+		                                         */
 		ALIGN64 pAuthenticateEx AuthenticateEx; /**< (offset 69)
 		                                 Callback for authentication.
 		                                 It is used to get the username/password. The reason
 		                                 argument tells why it was called.  */
-		UINT64 paddingE[80 - 70]; /* 70 */
+		ALIGN64 pChooseSmartcard
+		    ChooseSmartcard;      /* (offset 70)
+		                        Callback for choosing a smartcard for logon.
+		                        Used when multiple smartcards are available. Returns an index into a list
+		                        of SmartcardCertInfo pointers	*/
+		ALIGN64 pGetAadAuthCode GetAadAuthCode; /* (offset 71)
+		                                            Callback for obtaining an oauth2 authorization
+		                                           code for RDS AAD authentication */
+		UINT64 paddingE[80 - 72];               /* 72 */
 	};
 
 	struct rdp_channel_handles
@@ -489,21 +535,39 @@ fingerprint. DEPRECATED: Use VerifyChangedCertificateEx */
 	typedef struct rdp_channel_handles rdpChannelHandles;
 
 	FREERDP_API BOOL freerdp_context_new(freerdp* instance);
+	FREERDP_API BOOL freerdp_context_new_ex(freerdp* instance, rdpSettings* settings);
+	FREERDP_API BOOL freerdp_context_reset(freerdp* instance);
 	FREERDP_API void freerdp_context_free(freerdp* instance);
 
 	FREERDP_API BOOL freerdp_connect(freerdp* instance);
-	FREERDP_API BOOL freerdp_abort_connect(freerdp* instance);
-	FREERDP_API BOOL freerdp_shall_disconnect(freerdp* instance);
+
+	WINPR_DEPRECATED_VAR("use freerdp_abort_connect_context instead",
+	                     FREERDP_API BOOL freerdp_abort_connect(freerdp* instance));
+
+	FREERDP_API BOOL freerdp_abort_connect_context(rdpContext* context);
+	FREERDP_API HANDLE freerdp_abort_event(rdpContext* context);
+
+	WINPR_DEPRECATED_VAR("use freerdp_shall_disconnect_context instead",
+	                     FREERDP_API BOOL freerdp_shall_disconnect(freerdp* instance));
+
+	FREERDP_API BOOL freerdp_shall_disconnect_context(rdpContext* context);
 	FREERDP_API BOOL freerdp_disconnect(freerdp* instance);
 
-	FREERDP_API BOOL freerdp_disconnect_before_reconnect(freerdp* instance);
+	WINPR_DEPRECATED_VAR("use freerdp_disconnect_before_reconnect_context instead",
+	                     FREERDP_API BOOL freerdp_disconnect_before_reconnect(freerdp* instance));
+	FREERDP_API BOOL freerdp_disconnect_before_reconnect_context(rdpContext* context);
+
 	FREERDP_API BOOL freerdp_reconnect(freerdp* instance);
 
 	FREERDP_API UINT freerdp_channels_attach(freerdp* instance);
 	FREERDP_API UINT freerdp_channels_detach(freerdp* instance);
 
-	FREERDP_API BOOL freerdp_get_fds(freerdp* instance, void** rfds, int* rcount, void** wfds,
-	                                 int* wcount);
+#if defined(WITH_FREERDP_DEPRECATED)
+	FREERDP_API WINPR_DEPRECATED_VAR("Use freerdp_get_event_handles",
+	                                 BOOL freerdp_get_fds(freerdp* instance, void** rfds,
+	                                                      int* rcount, void** wfds, int* wcount));
+#endif
+
 	FREERDP_API BOOL freerdp_check_fds(freerdp* instance);
 
 	FREERDP_API DWORD freerdp_get_event_handles(rdpContext* context, HANDLE* events, DWORD count);
@@ -539,7 +603,8 @@ fingerprint. DEPRECATED: Use VerifyChangedCertificateEx */
 	FREERDP_API const char* freerdp_get_last_error_string(UINT32 error);
 	FREERDP_API const char* freerdp_get_last_error_category(UINT32 error);
 
-	FREERDP_API void freerdp_set_last_error(rdpContext* context, UINT32 lastError);
+#define freerdp_set_last_error(context, lastError) \
+	freerdp_set_last_error_ex((context), (lastError), __FUNCTION__, __FILE__, __LINE__)
 
 #define freerdp_set_last_error_if_not(context, lastError)             \
 	do                                                                \
@@ -561,6 +626,8 @@ fingerprint. DEPRECATED: Use VerifyChangedCertificateEx */
 	FREERDP_API BOOL freerdp_nla_impersonate(rdpContext* context);
 	FREERDP_API BOOL freerdp_nla_revert_to_self(rdpContext* context);
 
+	FREERDP_API UINT32 freerdp_get_nla_sspi_error(rdpContext* context);
+
 	FREERDP_API void clearChannelError(rdpContext* context);
 	FREERDP_API HANDLE getChannelErrorEventHandle(rdpContext* context);
 	FREERDP_API UINT getChannelError(rdpContext* context);
@@ -570,10 +637,37 @@ fingerprint. DEPRECATED: Use VerifyChangedCertificateEx */
 
 	FREERDP_API const char* freerdp_nego_get_routing_token(rdpContext* context, DWORD* length);
 
+	/** \brief returns the current \b CONNECTION_STATE of the context.
+	 *
+	 *  \param context A pointer to the context to query state
+	 *
+	 *  \return A \b CONNECTION_STATE the context is currently in
+	 */
 	FREERDP_API CONNECTION_STATE freerdp_get_state(const rdpContext* context);
+
+	/** \brief returns a string representation of a \b CONNECTION_STATE
+	 *
+	 *  \param state the \b CONNECTION_STATE to stringify
+	 *
+	 *  \return The string representation of the \b CONNECTION_STATE
+	 */
 	FREERDP_API const char* freerdp_state_string(CONNECTION_STATE state);
 
+	/** \brief Queries if the current \b CONNECTION_STATE of the context is an active connection.
+	 *
+	 * A connection is active, if the connection sequence has been passed, no disconnection requests
+	 * have been received and no network or other errors have forced a disconnect.
+	 *
+	 *  \param context A pointer to the context to query state
+	 *
+	 *  \return \b TRUE if the connection state indicates an active connection, \b FALSE otherwise
+	 */
+	FREERDP_API BOOL freerdp_is_active_state(const rdpContext* context);
+
 	FREERDP_API BOOL freerdp_channels_from_mcs(rdpSettings* settings, const rdpContext* context);
+
+	FREERDP_API BOOL freerdp_is_valid_mcs_create_request(const BYTE* data, size_t size);
+	FREERDP_API BOOL freerdp_is_valid_mcs_create_response(const BYTE* data, size_t size);
 
 #ifdef __cplusplus
 }

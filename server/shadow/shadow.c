@@ -16,35 +16,26 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <winpr/crt.h>
 #include <winpr/ssl.h>
-#include <winpr/wnd.h>
 #include <winpr/path.h>
 #include <winpr/cmdline.h>
 #include <winpr/winsock.h>
 
 #include <winpr/tools/makecert.h>
 
-#ifdef _WIN32
-static BOOL g_MessagePump = TRUE;
-#else
-static BOOL g_MessagePump = FALSE;
-#endif
-
 #include <freerdp/server/shadow.h>
+#include <freerdp/settings.h>
+
+#include <freerdp/log.h>
 #define TAG SERVER_TAG("shadow")
 
 int main(int argc, char** argv)
 {
-	MSG msg;
 	int status = 0;
-	DWORD dwExitCode;
-	rdpSettings* settings;
-	rdpShadowServer* server;
+	DWORD dwExitCode = 0;
 	COMMAND_LINE_ARGUMENT_A shadow_args[] = {
 		{ "log-filters", COMMAND_LINE_VALUE_REQUIRED, "<tag>:<level>[,<tag>:<level>[,...]]", NULL,
 		  NULL, -1, NULL, "Set logger filters, see wLog(7) for details" },
@@ -79,6 +70,12 @@ int main(int argc, char** argv)
 		  "nla extended protocol security" },
 		{ "sam-file", COMMAND_LINE_VALUE_REQUIRED, "<file>", NULL, NULL, -1, NULL,
 		  "NTLM SAM file for NLA authentication" },
+		{ "keytab", COMMAND_LINE_VALUE_REQUIRED, "<file>", NULL, NULL, -1, NULL,
+		  "Kerberos keytab file for NLA authentication" },
+		{ "ccache", COMMAND_LINE_VALUE_REQUIRED, "<file>", NULL, NULL, -1, NULL,
+		  "Kerberos host ccache file for NLA authentication" },
+		{ "tls-secrets-file", COMMAND_LINE_VALUE_REQUIRED, "<file>", NULL, NULL, -1, NULL,
+		  "file where tls secrets shall be stored" },
 		{ "gfx-progressive", COMMAND_LINE_VALUE_BOOL, NULL, BoolValueTrue, NULL, -1, NULL,
 		  "Allow GFX progressive codec" },
 		{ "gfx-rfx", COMMAND_LINE_VALUE_BOOL, NULL, BoolValueTrue, NULL, -1, NULL,
@@ -100,32 +97,35 @@ int main(int argc, char** argv)
 
 	shadow_subsystem_set_entry_builtin(NULL);
 
-	server = shadow_server_new();
+	rdpShadowServer* server = shadow_server_new();
 
 	if (!server)
 	{
 		status = -1;
 		WLog_ERR(TAG, "Server new failed");
-		goto fail_server_new;
+		goto fail;
 	}
 
-	settings = server->settings;
+	rdpSettings* settings = server->settings;
+	WINPR_ASSERT(settings);
 
-	settings->NlaSecurity = TRUE;
-	settings->TlsSecurity = TRUE;
-	settings->RdpSecurity = TRUE;
+	if (!freerdp_settings_set_bool(settings, FreeRDP_NlaSecurity, TRUE) ||
+	    !freerdp_settings_set_bool(settings, FreeRDP_TlsSecurity, TRUE) ||
+	    !freerdp_settings_set_bool(settings, FreeRDP_RdpSecurity, TRUE))
+		goto fail;
 
 	/* By default allow all GFX modes.
 	 * This can be changed with command line flags [+|-]gfx-CODEC
 	 */
-	freerdp_settings_set_uint32(settings, FreeRDP_ColorDepth, 32);
-	freerdp_settings_set_bool(settings, FreeRDP_NSCodec, TRUE);
-	freerdp_settings_set_bool(settings, FreeRDP_RemoteFxCodec, TRUE);
-	freerdp_settings_set_bool(settings, FreeRDP_GfxH264, TRUE);
-	freerdp_settings_set_bool(settings, FreeRDP_GfxAVC444, TRUE);
-	freerdp_settings_set_bool(settings, FreeRDP_GfxAVC444v2, TRUE);
-	freerdp_settings_set_bool(settings, FreeRDP_GfxProgressive, TRUE);
-	freerdp_settings_set_bool(settings, FreeRDP_GfxProgressiveV2, TRUE);
+	if (!freerdp_settings_set_uint32(settings, FreeRDP_ColorDepth, 32) ||
+	    !freerdp_settings_set_bool(settings, FreeRDP_NSCodec, TRUE) ||
+	    !freerdp_settings_set_bool(settings, FreeRDP_RemoteFxCodec, TRUE) ||
+	    !freerdp_settings_set_bool(settings, FreeRDP_GfxH264, TRUE) ||
+	    !freerdp_settings_set_bool(settings, FreeRDP_GfxAVC444, TRUE) ||
+	    !freerdp_settings_set_bool(settings, FreeRDP_GfxAVC444v2, TRUE) ||
+	    !freerdp_settings_set_bool(settings, FreeRDP_GfxProgressive, TRUE) ||
+	    !freerdp_settings_set_bool(settings, FreeRDP_GfxProgressiveV2, TRUE))
+		goto fail;
 
 #ifdef WITH_SHADOW_X11
 	server->authentication = TRUE;
@@ -136,29 +136,31 @@ int main(int argc, char** argv)
 	if ((status = shadow_server_parse_command_line(server, argc, argv, shadow_args)) < 0)
 	{
 		shadow_server_command_line_status_print(server, argc, argv, status, shadow_args);
-		goto fail_parse_command_line;
+		goto fail;
 	}
 
 	if ((status = shadow_server_init(server)) < 0)
 	{
 		WLog_ERR(TAG, "Server initialization failed.");
-		goto fail_server_init;
+		goto fail;
 	}
 
 	if ((status = shadow_server_start(server)) < 0)
 	{
 		WLog_ERR(TAG, "Failed to start server.");
-		goto fail_server_start;
+		goto fail;
 	}
 
-	if (g_MessagePump)
+#ifdef _WIN32
 	{
+		MSG msg = { 0 };
 		while (GetMessage(&msg, 0, 0, 0))
 		{
 			TranslateMessage(&msg);
 			DispatchMessage(&msg);
 		}
 	}
+#endif
 
 	WaitForSingleObject(server->thread, INFINITE);
 
@@ -167,11 +169,8 @@ int main(int argc, char** argv)
 	else
 		status = (int)dwExitCode;
 
-fail_server_start:
+fail:
 	shadow_server_uninit(server);
-fail_server_init:
-fail_parse_command_line:
 	shadow_server_free(server);
-fail_server_new:
 	return status;
 }

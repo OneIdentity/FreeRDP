@@ -18,9 +18,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -40,7 +38,9 @@
  * will need to fix that later on cleanly
  */
 
+#if defined(CHANNEL_AUDIN_SERVER)
 #include <freerdp/server/audin.h>
+#endif
 #include <freerdp/server/rdpsnd.h>
 #include <freerdp/server/cliprdr.h>
 #include <freerdp/server/echo.h>
@@ -50,15 +50,30 @@
 #include <freerdp/server/remdesk.h>
 #include <freerdp/server/encomsp.h>
 #include <freerdp/server/rail.h>
+#include <freerdp/server/telemetry.h>
 #include <freerdp/server/rdpgfx.h>
 #include <freerdp/server/disp.h>
+
+#if defined(CHANNEL_RDPECAM_SERVER)
+#include <freerdp/server/rdpecam-enumerator.h>
+#include <freerdp/server/rdpecam.h>
+#endif
+
+#ifdef WITH_CHANNEL_GFXREDIR
 #include <freerdp/server/gfxredir.h>
+#endif /* WITH_CHANNEL_GFXREDIR */
+
+#if defined(CHANNEL_AINPUT_SERVER)
+#include <freerdp/server/ainput.h>
+#endif
 
 extern void freerdp_channels_dummy(void);
 
 void freerdp_channels_dummy(void)
 {
+#if defined(CHANNEL_AUDIN_SERVER)
 	audin_server_context* audin;
+#endif
 	RdpsndServerContext* rdpsnd;
 	CliprdrServerContext* cliprdr;
 	echo_server_context* echo;
@@ -68,13 +83,22 @@ void freerdp_channels_dummy(void)
 	RemdeskServerContext* remdesk;
 	EncomspServerContext* encomsp;
 	RailServerContext* rail;
+	TelemetryServerContext* telemetry;
 	RdpgfxServerContext* rdpgfx;
 	DispServerContext* disp;
+#if defined (CHANNEL_RDPECAM_SERVER)
+	CamDevEnumServerContext* camera_enumerator;
+	CameraDeviceServerContext* camera_device;
+#endif
 #ifdef WITH_CHANNEL_GFXREDIR
 	GfxRedirServerContext* gfxredir;
 #endif // WITH_CHANNEL_GFXREDIR
+#if defined(CHANNEL_AUDIN_SERVER)
 	audin = audin_server_context_new(NULL);
+#endif
+#if defined(CHANNEL_AUDIN_SERVER)
 	audin_server_context_free(audin);
+#endif
 	rdpsnd = rdpsnd_server_context_new(NULL);
 	rdpsnd_server_context_free(rdpsnd);
 	cliprdr = cliprdr_server_context_new(NULL);
@@ -93,14 +117,30 @@ void freerdp_channels_dummy(void)
 	encomsp_server_context_free(encomsp);
 	rail = rail_server_context_new(NULL);
 	rail_server_context_free(rail);
+	telemetry = telemetry_server_context_new(NULL);
+	telemetry_server_context_free(telemetry);
 	rdpgfx = rdpgfx_server_context_new(NULL);
 	rdpgfx_server_context_free(rdpgfx);
 	disp = disp_server_context_new(NULL);
 	disp_server_context_free(disp);
+
+#if defined (CHANNEL_RDPECAM_SERVER)
+	camera_enumerator = cam_dev_enum_server_context_new(NULL);
+	cam_dev_enum_server_context_free(camera_enumerator);
+	camera_device = camera_device_server_context_new(NULL);
+	camera_device_server_context_free(camera_device);
+#endif
+
 #ifdef WITH_CHANNEL_GFXREDIR
 	gfxredir = gfxredir_server_context_new(NULL);
 	gfxredir_server_context_free(gfxredir);
 #endif // WITH_CHANNEL_GFXREDIR
+#if defined(CHANNEL_AINPUT_SERVER)
+	{
+		ainput_server_context* ainput = ainput_server_context_new(NULL);
+		ainput_server_context_free(ainput);
+	}
+#endif
 }
 
 /**

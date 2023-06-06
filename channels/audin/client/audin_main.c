@@ -20,9 +20,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <errno.h>
 #include <winpr/assert.h>
@@ -39,29 +37,25 @@
 #include <winpr/stream.h>
 #include <freerdp/freerdp.h>
 #include <freerdp/codec/dsp.h>
+#include <freerdp/client/channels.h>
 #include <freerdp/channels/audin.h>
 
 #include "audin_main.h"
 
-#define MSG_SNDIN_VERSION 0x01
-#define MSG_SNDIN_FORMATS 0x02
-#define MSG_SNDIN_OPEN 0x03
-#define MSG_SNDIN_OPEN_REPLY 0x04
-#define MSG_SNDIN_DATA_INCOMING 0x05
-#define MSG_SNDIN_DATA 0x06
-#define MSG_SNDIN_FORMATCHANGE 0x07
+#define SNDIN_VERSION 0x02
 
-typedef struct _AUDIN_LISTENER_CALLBACK AUDIN_LISTENER_CALLBACK;
-struct _AUDIN_LISTENER_CALLBACK
+typedef enum
 {
-	IWTSListenerCallback iface;
+	MSG_SNDIN_VERSION = 0x01,
+	MSG_SNDIN_FORMATS = 0x02,
+	MSG_SNDIN_OPEN = 0x03,
+	MSG_SNDIN_OPEN_REPLY = 0x04,
+	MSG_SNDIN_DATA_INCOMING = 0x05,
+	MSG_SNDIN_DATA = 0x06,
+	MSG_SNDIN_FORMATCHANGE = 0x07,
+} MSG_SNDIN;
 
-	IWTSPlugin* plugin;
-	IWTSVirtualChannelManager* channel_mgr;
-};
-
-typedef struct _AUDIN_CHANNEL_CALLBACK AUDIN_CHANNEL_CALLBACK;
-struct _AUDIN_CHANNEL_CALLBACK
+typedef struct
 {
 	IWTSVirtualChannelCallback iface;
 
@@ -76,14 +70,13 @@ struct _AUDIN_CHANNEL_CALLBACK
 	 */
 	AUDIO_FORMAT* formats;
 	UINT32 formats_count;
-};
+} AUDIN_CHANNEL_CALLBACK;
 
-typedef struct _AUDIN_PLUGIN AUDIN_PLUGIN;
-struct _AUDIN_PLUGIN
+typedef struct
 {
 	IWTSPlugin iface;
 
-	AUDIN_LISTENER_CALLBACK* listener_callback;
+	GENERIC_LISTENER_CALLBACK* listener_callback;
 
 	/* Parsed plugin data */
 	AUDIO_FORMAT* fixed_format;
@@ -105,7 +98,8 @@ struct _AUDIN_PLUGIN
 	IWTSListener* listener;
 
 	BOOL initialized;
-};
+	UINT32 version;
+} AUDIN_PLUGIN;
 
 static BOOL audin_process_addin_args(AUDIN_PLUGIN* audin, const ADDIN_ARGV* args);
 
@@ -139,10 +133,10 @@ static UINT audin_channel_write_and_free(AUDIN_CHANNEL_CALLBACK* callback, wStre
 static UINT audin_process_version(AUDIN_PLUGIN* audin, AUDIN_CHANNEL_CALLBACK* callback, wStream* s)
 {
 	wStream* out;
-	const UINT32 ClientVersion = 0x01;
+	const UINT32 ClientVersion = SNDIN_VERSION;
 	UINT32 ServerVersion;
 
-	if (Stream_GetRemainingLength(s) < 4)
+	if (!Stream_CheckAndLogRequiredLength(TAG, s, 4))
 		return ERROR_INVALID_DATA;
 
 	Stream_Read_UINT32(s, ServerVersion);
@@ -150,7 +144,7 @@ static UINT audin_process_version(AUDIN_PLUGIN* audin, AUDIN_CHANNEL_CALLBACK* c
 	           ServerVersion, ClientVersion);
 
 	/* Do not answer server packet, we do not support the channel version. */
-	if (ServerVersion != ClientVersion)
+	if (ServerVersion > ClientVersion)
 	{
 		WLog_Print(audin->log, WLOG_WARN,
 		           "Incompatible channel version server=%" PRIu32
@@ -158,6 +152,7 @@ static UINT audin_process_version(AUDIN_PLUGIN* audin, AUDIN_CHANNEL_CALLBACK* c
 		           ServerVersion, ClientVersion);
 		return CHANNEL_RC_OK;
 	}
+	audin->version = ServerVersion;
 
 	out = Stream_New(NULL, 5);
 
@@ -200,7 +195,7 @@ static UINT audin_process_formats(AUDIN_PLUGIN* audin, AUDIN_CHANNEL_CALLBACK* c
 	UINT32 NumFormats;
 	UINT32 cbSizeFormatsPacket;
 
-	if (Stream_GetRemainingLength(s) < 8)
+	if (!Stream_CheckAndLogRequiredLength(TAG, s, 8))
 		return ERROR_INVALID_DATA;
 
 	Stream_Read_UINT32(s, NumFormats);
@@ -474,7 +469,7 @@ static UINT audin_process_open(AUDIN_PLUGIN* audin, AUDIN_CHANNEL_CALLBACK* call
 	UINT32 FramesPerPacket;
 	UINT error = CHANNEL_RC_OK;
 
-	if (Stream_GetRemainingLength(s) < 8)
+	if (!Stream_CheckAndLogRequiredLength(TAG, s, 8))
 		return ERROR_INVALID_DATA;
 
 	Stream_Read_UINT32(s, FramesPerPacket);
@@ -485,7 +480,7 @@ static UINT audin_process_open(AUDIN_PLUGIN* audin, AUDIN_CHANNEL_CALLBACK* call
 
 	if (initialFormat >= callback->formats_count)
 	{
-		WLog_Print(audin->log, WLOG_ERROR, "invalid format index %" PRIu32 " (total %d)",
+		WLog_Print(audin->log, WLOG_ERROR, "invalid format index %" PRIu32 " (total %" PRIu32 ")",
 		           initialFormat, callback->formats_count);
 		return ERROR_INVALID_DATA;
 	}
@@ -518,7 +513,7 @@ static UINT audin_process_format_change(AUDIN_PLUGIN* audin, AUDIN_CHANNEL_CALLB
 	UINT32 NewFormat;
 	UINT error = CHANNEL_RC_OK;
 
-	if (Stream_GetRemainingLength(s) < 4)
+	if (!Stream_CheckAndLogRequiredLength(TAG, s, 4))
 		return ERROR_INVALID_DATA;
 
 	Stream_Read_UINT32(s, NewFormat);
@@ -526,8 +521,8 @@ static UINT audin_process_format_change(AUDIN_PLUGIN* audin, AUDIN_CHANNEL_CALLB
 
 	if (NewFormat >= callback->formats_count)
 	{
-		WLog_Print(audin->log, WLOG_ERROR, "invalid format index %" PRIu32 " (total %d)", NewFormat,
-		           callback->formats_count);
+		WLog_Print(audin->log, WLOG_ERROR, "invalid format index %" PRIu32 " (total %" PRIu32 ")",
+		           NewFormat, callback->formats_count);
 		return ERROR_INVALID_DATA;
 	}
 
@@ -573,7 +568,7 @@ static UINT audin_on_data_received(IWTSVirtualChannelCallback* pChannelCallback,
 	if (!audin)
 		return ERROR_INTERNAL_ERROR;
 
-	if (Stream_GetRemainingCapacity(data) < 1)
+	if (!Stream_CheckAndLogRequiredCapacity(TAG, data, 1))
 		return ERROR_NO_DATA;
 
 	Stream_Read_UINT8(data, MessageId);
@@ -643,7 +638,7 @@ static UINT audin_on_new_channel_connection(IWTSListenerCallback* pListenerCallb
 {
 	AUDIN_CHANNEL_CALLBACK* callback;
 	AUDIN_PLUGIN* audin;
-	AUDIN_LISTENER_CALLBACK* listener_callback = (AUDIN_LISTENER_CALLBACK*)pListenerCallback;
+	GENERIC_LISTENER_CALLBACK* listener_callback = (GENERIC_LISTENER_CALLBACK*)pListenerCallback;
 
 	if (!listener_callback || !listener_callback->plugin)
 		return ERROR_INTERNAL_ERROR;
@@ -690,7 +685,8 @@ static UINT audin_plugin_initialize(IWTSPlugin* pPlugin, IWTSVirtualChannelManag
 	}
 
 	WLog_Print(audin->log, WLOG_TRACE, "...");
-	audin->listener_callback = (AUDIN_LISTENER_CALLBACK*)calloc(1, sizeof(AUDIN_LISTENER_CALLBACK));
+	audin->listener_callback =
+	    (GENERIC_LISTENER_CALLBACK*)calloc(1, sizeof(GENERIC_LISTENER_CALLBACK));
 
 	if (!audin->listener_callback)
 	{
@@ -956,18 +952,12 @@ BOOL audin_process_addin_args(AUDIN_PLUGIN* audin, const ADDIN_ARGV* args)
 	return TRUE;
 }
 
-#ifdef BUILTIN_CHANNELS
-#define DVCPluginEntry audin_DVCPluginEntry
-#else
-#define DVCPluginEntry FREERDP_API DVCPluginEntry
-#endif
-
 /**
  * Function description
  *
  * @return 0 on success, otherwise a Win32 error code
  */
-UINT DVCPluginEntry(IDRDYNVC_ENTRY_POINTS* pEntryPoints)
+UINT audin_DVCPluginEntry(IDRDYNVC_ENTRY_POINTS* pEntryPoints)
 {
 	struct SubsystemEntry
 	{
@@ -996,6 +986,9 @@ UINT DVCPluginEntry(IDRDYNVC_ENTRY_POINTS* pEntryPoints)
 #endif
 #if defined(WITH_MACAUDIO)
 		{ "mac", "default" },
+#endif
+#if defined(WITH_IOSAUDIO)
+		{ "ios", "default" },
 #endif
 #if defined(WITH_SNDIO)
 		{ "sndio", "default" },
@@ -1041,8 +1034,7 @@ UINT DVCPluginEntry(IDRDYNVC_ENTRY_POINTS* pEntryPoints)
 	audin->iface.Attached = audin_plugin_attached;
 	audin->iface.Detached = audin_plugin_detached;
 	args = pEntryPoints->GetPluginData(pEntryPoints);
-	audin->rdpcontext =
-	    ((freerdp*)((rdpSettings*)pEntryPoints->GetRdpSettings(pEntryPoints))->instance)->context;
+	audin->rdpcontext = pEntryPoints->GetRdpContext(pEntryPoints);
 
 	if (args)
 	{

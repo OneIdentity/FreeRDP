@@ -19,13 +19,11 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <winpr/config.h>
 
 #include "wlog.h"
 
-#include "wlog/PacketMessage.h"
+#include "PacketMessage.h"
 
 #include <winpr/wtypes.h>
 #include <winpr/crt.h>
@@ -234,7 +232,8 @@ wPcap* Pcap_Open(char* name, BOOL write)
 	return pcap;
 
 out_fail:
-	fclose(pcap_fp);
+	if (pcap_fp)
+		fclose(pcap_fp);
 	free(pcap);
 	return NULL;
 }
@@ -268,21 +267,22 @@ void Pcap_Close(wPcap* pcap)
 static BOOL WLog_PacketMessage_Write_EthernetHeader(wPcap* pcap, wEthernetHeader* ethernet)
 {
 	wStream* s;
-	BYTE buffer[14];
+	wStream sbuffer = { 0 };
+	BYTE buffer[14] = { 0 };
 	BOOL ret = TRUE;
 
 	if (!pcap || !pcap->fp || !ethernet)
 		return FALSE;
 
-	s = Stream_New(buffer, 14);
+	s = Stream_StaticInit(&sbuffer, buffer, sizeof(buffer));
 	if (!s)
 		return FALSE;
 	Stream_Write(s, ethernet->Destination, 6);
 	Stream_Write(s, ethernet->Source, 6);
 	Stream_Write_UINT16_BE(s, ethernet->Type);
-	if (fwrite(buffer, 14, 1, pcap->fp) != 1)
+	if (fwrite(buffer, sizeof(buffer), 1, pcap->fp) != 1)
 		ret = FALSE;
-	Stream_Free(s, FALSE);
+
 	return ret;
 }
 
@@ -311,13 +311,14 @@ static UINT16 IPv4Checksum(BYTE* ipv4, int length)
 static BOOL WLog_PacketMessage_Write_IPv4Header(wPcap* pcap, wIPv4Header* ipv4)
 {
 	wStream* s;
-	BYTE buffer[20];
+	wStream sbuffer = { 0 };
+	BYTE buffer[20] = { 0 };
 	int ret = TRUE;
 
 	if (!pcap || !pcap->fp || !ipv4)
 		return FALSE;
 
-	s = Stream_New(buffer, 20);
+	s = Stream_StaticInit(&sbuffer, buffer, sizeof(buffer));
 	if (!s)
 		return FALSE;
 	Stream_Write_UINT8(s, (ipv4->Version << 4) | ipv4->InternetHeaderLength);
@@ -333,23 +334,24 @@ static BOOL WLog_PacketMessage_Write_IPv4Header(wPcap* pcap, wIPv4Header* ipv4)
 	ipv4->HeaderChecksum = IPv4Checksum((BYTE*)buffer, 20);
 	Stream_Rewind(s, 10);
 	Stream_Write_UINT16(s, ipv4->HeaderChecksum);
-	Stream_Seek(s, 8);
-	if (fwrite(buffer, 20, 1, pcap->fp) != 1)
+
+	if (fwrite(buffer, sizeof(buffer), 1, pcap->fp) != 1)
 		ret = FALSE;
-	Stream_Free(s, FALSE);
+
 	return ret;
 }
 
 static BOOL WLog_PacketMessage_Write_TcpHeader(wPcap* pcap, wTcpHeader* tcp)
 {
 	wStream* s;
-	BYTE buffer[20];
+	wStream sbuffer = { 0 };
+	BYTE buffer[20] = { 0 };
 	BOOL ret = TRUE;
 
 	if (!pcap || !pcap->fp || !tcp)
 		return FALSE;
 
-	s = Stream_New(buffer, 20);
+	s = Stream_StaticInit(&sbuffer, buffer, sizeof(buffer));
 	if (!s)
 		return FALSE;
 	Stream_Write_UINT16_BE(s, tcp->SourcePort);
@@ -364,11 +366,10 @@ static BOOL WLog_PacketMessage_Write_TcpHeader(wPcap* pcap, wTcpHeader* tcp)
 
 	if (pcap->fp)
 	{
-		if (fwrite(buffer, 20, 1, pcap->fp) != 1)
+		if (fwrite(buffer, sizeof(buffer), 1, pcap->fp) != 1)
 			ret = FALSE;
 	}
 
-	Stream_Free(s, FALSE);
 	return ret;
 }
 

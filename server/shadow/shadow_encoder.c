@@ -16,9 +16,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <winpr/assert.h>
 
@@ -26,6 +24,7 @@
 
 #include "shadow_encoder.h"
 
+#include <freerdp/log.h>
 #define TAG CLIENT_TAG("shadow")
 
 UINT32 shadow_encoder_preferred_fps(rdpShadowEncoder* encoder)
@@ -141,7 +140,7 @@ static int shadow_encoder_init_rfx(rdpShadowEncoder* encoder)
 	if (!rfx_context_reset(encoder->rfx, encoder->width, encoder->height))
 		goto fail;
 
-	encoder->rfx->mode = encoder->server->rfxMode;
+	rfx_context_set_mode(encoder->rfx, encoder->server->rfxMode);
 	rfx_context_set_pixel_format(encoder->rfx, PIXEL_FORMAT_BGRX32);
 	encoder->codecs |= FREERDP_CODEC_REMOTEFX;
 	return 1;
@@ -242,10 +241,17 @@ static int shadow_encoder_init_h264(rdpShadowEncoder* encoder)
 	if (!h264_context_reset(encoder->h264, encoder->width, encoder->height))
 		goto fail;
 
-	encoder->h264->RateControlMode = encoder->server->h264RateControlMode;
-	encoder->h264->BitRate = encoder->server->h264BitRate;
-	encoder->h264->FrameRate = encoder->server->h264FrameRate;
-	encoder->h264->QP = encoder->server->h264QP;
+	if (!h264_context_set_option(encoder->h264, H264_CONTEXT_OPTION_RATECONTROL,
+	                             encoder->server->h264RateControlMode))
+		goto fail;
+	if (!h264_context_set_option(encoder->h264, H264_CONTEXT_OPTION_BITRATE,
+	                             encoder->server->h264BitRate))
+		goto fail;
+	if (!h264_context_set_option(encoder->h264, H264_CONTEXT_OPTION_FRAMERATE,
+	                             encoder->server->h264FrameRate))
+		goto fail;
+	if (!h264_context_set_option(encoder->h264, H264_CONTEXT_OPTION_QP, encoder->server->h264QP))
+		goto fail;
 
 	encoder->codecs |= FREERDP_CODEC_AVC420 | FREERDP_CODEC_AVC444;
 	return 1;
@@ -373,18 +379,18 @@ static int shadow_encoder_uninit(rdpShadowEncoder* encoder)
 		encoder->bs = NULL;
 	}
 
-		shadow_encoder_uninit_rfx(encoder);
+	shadow_encoder_uninit_rfx(encoder);
 
-		shadow_encoder_uninit_nsc(encoder);
+	shadow_encoder_uninit_nsc(encoder);
 
-		shadow_encoder_uninit_planar(encoder);
+	shadow_encoder_uninit_planar(encoder);
 
-		shadow_encoder_uninit_interleaved(encoder);
-		shadow_encoder_uninit_h264(encoder);
+	shadow_encoder_uninit_interleaved(encoder);
+	shadow_encoder_uninit_h264(encoder);
 
-	    shadow_encoder_uninit_progressive(encoder);
+	shadow_encoder_uninit_progressive(encoder);
 
-	    return 1;
+	return 1;
 }
 
 int shadow_encoder_reset(rdpShadowEncoder* encoder)

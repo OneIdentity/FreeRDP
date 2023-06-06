@@ -17,9 +17,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <winpr/assert.h>
 #include <stdio.h>
@@ -61,7 +59,8 @@
 
 #if !defined(WITH_DSP_FFMPEG)
 
-union _ADPCM {
+typedef union
+{
 	struct
 	{
 		size_t packet_size;
@@ -75,10 +74,9 @@ union _ADPCM {
 		INT32 sample1[2];
 		INT32 sample2[2];
 	} ms;
-};
-typedef union _ADPCM ADPCM;
+} ADPCM;
 
-struct _FREERDP_DSP_CONTEXT
+struct S_FREERDP_DSP_CONTEXT
 {
 	BOOL encoder;
 
@@ -214,23 +212,20 @@ static BOOL freerdp_dsp_resample(FREERDP_DSP_CONTEXT* context, const BYTE* src, 
 	size_t sframes, rframes;
 	size_t rsize;
 	size_t sbytes, rbytes;
-#endif
+	size_t dstChannels;
+	size_t srcChannels;
 	size_t srcBytesPerFrame, dstBytesPerFrame;
-	size_t srcChannels, dstChannels;
+#endif
 	AUDIO_FORMAT format;
 
 	if (srcFormat->wFormatTag != WAVE_FORMAT_PCM)
 	{
-		WLog_ERR(TAG, "%s requires %s for sample input, got %s", __FUNCTION__,
+		WLog_ERR(TAG, "requires %s for sample input, got %s",
 		         audio_format_get_tag_string(WAVE_FORMAT_PCM),
 		         audio_format_get_tag_string(srcFormat->wFormatTag));
 		return FALSE;
 	}
 
-	srcChannels = srcFormat->nChannels;
-	dstChannels = context->format.nChannels;
-	srcBytesPerFrame = (srcFormat->wBitsPerSample > 8) ? 2 : 1;
-	dstBytesPerFrame = (context->format.wBitsPerSample > 8) ? 2 : 1;
 	/* We want to ignore differences of source and destination format. */
 	format = *srcFormat;
 	format.wFormatTag = WAVE_FORMAT_UNKNOWN;
@@ -244,6 +239,10 @@ static BOOL freerdp_dsp_resample(FREERDP_DSP_CONTEXT* context, const BYTE* src, 
 	}
 
 #if defined(WITH_SOXR)
+	srcBytesPerFrame = (srcFormat->wBitsPerSample > 8) ? 2 : 1;
+	dstBytesPerFrame = (context->format.wBitsPerSample > 8) ? 2 : 1;
+	srcChannels = srcFormat->nChannels;
+	dstChannels = context->format.nChannels;
 	sbytes = srcChannels * srcBytesPerFrame;
 	sframes = size / sbytes;
 	rbytes = dstBytesPerFrame * dstChannels;
@@ -328,7 +327,6 @@ static UINT16 dsp_decode_ima_adpcm_sample(ADPCM* adpcm, unsigned int channel, BY
 static BOOL freerdp_dsp_decode_ima_adpcm(FREERDP_DSP_CONTEXT* context, const BYTE* src, size_t size,
                                          wStream* out)
 {
-	size_t pos;
 	BYTE sample;
 	UINT16 decoded;
 	size_t out_size = size * 4;
@@ -339,8 +337,6 @@ static BOOL freerdp_dsp_decode_ima_adpcm(FREERDP_DSP_CONTEXT* context, const BYT
 
 	if (!Stream_EnsureCapacity(out, out_size))
 		return FALSE;
-
-	pos = Stream_GetPosition(out);
 
 	while (size > 0)
 	{
@@ -582,11 +578,17 @@ static BOOL freerdp_dsp_decode_faad(FREERDP_DSP_CONTEXT* context, const BYTE* sr
 
 	if (!context->faadSetup)
 	{
+		union
+		{
+			const void* cpv;
+			void* pv;
+		} cnv;
 		unsigned long samplerate;
 		unsigned char channels;
-		long err =
-		    NeAACDecInit(context->faad, /* API is not modifying content */ (unsigned char*)src,
-		                 size, &samplerate, &channels);
+		long err;
+		cnv.cpv = src;
+		err = NeAACDecInit(context->faad, /* API is not modifying content */ cnv.pv, size,
+		                   &samplerate, &channels);
 
 		if (err != 0)
 			return FALSE;
@@ -602,6 +604,11 @@ static BOOL freerdp_dsp_decode_faad(FREERDP_DSP_CONTEXT* context, const BYTE* sr
 
 	while (offset < size)
 	{
+		union
+		{
+			const void* cpv;
+			void* pv;
+		} cnv;
 		size_t outSize;
 		void* sample_buffer;
 		outSize = context->format.nSamplesPerSec * context->format.nChannels *
@@ -611,8 +618,10 @@ static BOOL freerdp_dsp_decode_faad(FREERDP_DSP_CONTEXT* context, const BYTE* sr
 			return FALSE;
 
 		sample_buffer = Stream_Pointer(out);
-		output = NeAACDecDecode2(context->faad, &info, (unsigned char*)&src[offset], size - offset,
-		                         &sample_buffer, Stream_GetRemainingCapacity(out));
+
+		cnv.cpv = &src[offset];
+		output = NeAACDecDecode2(context->faad, &info, cnv.pv, size - offset, &sample_buffer,
+		                         Stream_GetRemainingCapacity(out));
 
 		if (info.error != 0)
 			return FALSE;
@@ -712,23 +721,18 @@ static BOOL freerdp_dsp_encode_ima_adpcm(FREERDP_DSP_CONTEXT* context, const BYT
                                          wStream* out)
 {
 	int i;
-	size_t start;
 	INT16 sample;
 	BYTE encoded;
-	size_t out_size;
 	size_t align;
-	out_size = size / 2;
 
 	if (!Stream_EnsureRemainingCapacity(out, size))
 		return FALSE;
-
-	start = Stream_GetPosition(context->buffer);
 
 	align = (context->format.nChannels > 1) ? 32 : 4;
 
 	while (size >= align)
 	{
-		if ((Stream_GetPosition(context->buffer) - start) % context->format.nBlockAlign == 0)
+		if (Stream_GetPosition(context->buffer) % context->format.nBlockAlign == 0)
 		{
 			Stream_Write_UINT8(context->buffer, context->adpcm.ima.last_sample[0] & 0xFF);
 			Stream_Write_UINT8(context->buffer, (context->adpcm.ima.last_sample[0] >> 8) & 0xFF);
@@ -775,7 +779,7 @@ static BOOL freerdp_dsp_encode_ima_adpcm(FREERDP_DSP_CONTEXT* context, const BYT
 			size -= 4;
 		}
 
-		if (Stream_GetPosition(context->buffer) - start == context->adpcm.ima.packet_size)
+		if (Stream_GetPosition(context->buffer) >= context->adpcm.ima.packet_size)
 		{
 			BYTE* bsrc = Stream_Buffer(context->buffer);
 			Stream_Write(out, bsrc, context->adpcm.ima.packet_size);
@@ -945,9 +949,7 @@ static BOOL freerdp_dsp_encode_ms_adpcm(FREERDP_DSP_CONTEXT* context, const BYTE
 {
 	size_t start;
 	INT32 sample;
-	size_t out_size;
 	const size_t step = 8 + ((context->format.nChannels > 1) ? 4 : 0);
-	out_size = size / 2;
 
 	if (!Stream_EnsureRemainingCapacity(out, size))
 		return FALSE;

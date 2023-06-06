@@ -19,9 +19,7 @@
 
 /* GDI Pen Functions: http://msdn.microsoft.com/en-us/library/dd162790 */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,11 +31,15 @@
 #include <freerdp/gdi/pen.h>
 
 /**
- * Create a new pen.\n
- * @msdn{dd183509}
+ * @brief Create a new pen.
+ * msdn{dd183509}
+ *
  * @param fnPenStyle pen style
  * @param nWidth pen width
  * @param crColor pen color
+ * @param format the color format
+ * @param palette A pointer to a color palette
+ *
  * @return new pen
  */
 

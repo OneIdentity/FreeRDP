@@ -128,12 +128,11 @@
  * 	dec_2_3_100_sampleimage3.bmp
  */
 
-struct _EGFX_SAMPLE_FILE
+typedef struct
 {
 	BYTE* buffer;
 	size_t size;
-};
-typedef struct _EGFX_SAMPLE_FILE EGFX_SAMPLE_FILE;
+} EGFX_SAMPLE_FILE;
 
 static int g_Width = 0;
 static int g_Height = 0;
@@ -905,7 +904,7 @@ static int test_progressive_decode(PROGRESSIVE_CONTEXT* progressive, EGFX_SAMPLE
 
 		if (cnt)
 		{
-			float rate = ((float)cnt) / ((float)size) * 100.0f;
+			const float rate = ((float)cnt) / ((float)size) * 100.0f;
 			printf("Progressive RemoteFX decompression failure\n");
 			printf("Actual, Expected (%d/%d = %.3f%%):\n", cnt, size, rate);
 		}
@@ -921,14 +920,12 @@ static int test_progressive_ms_sample(char* ms_sample_path)
 	int i, j, k;
 	int count;
 	int status;
-	EGFX_SAMPLE_FILE files[3][4][4];
-	EGFX_SAMPLE_FILE bitmaps[3][4][4];
+	EGFX_SAMPLE_FILE files[3][4][4] = { 0 };
+	EGFX_SAMPLE_FILE bitmaps[3][4][4] = { 0 };
 	PROGRESSIVE_CONTEXT* progressive;
 	g_Width = 1920;
 	g_Height = 1080;
 	g_DstStep = g_Width * 4;
-	ZeroMemory(files, sizeof(files));
-	ZeroMemory(bitmaps, sizeof(bitmaps));
 	status = test_progressive_load_files(ms_sample_path, files);
 
 	if (status < 0)
@@ -963,7 +960,7 @@ static int test_progressive_ms_sample(char* ms_sample_path)
 
 	count = 4;
 	progressive = progressive_context_new(FALSE);
-	g_DstData = _aligned_malloc(g_DstStep * g_Height, 16);
+	g_DstData = winpr_aligned_malloc(g_DstStep * g_Height, 16);
 	progressive_create_surface_context(progressive, 0, g_Width, g_Height);
 
 	/* image 1 */
@@ -1016,7 +1013,7 @@ static int test_progressive_ms_sample(char* ms_sample_path)
 		}
 	}
 
-	_aligned_free(g_DstData);
+	winpr_aligned_free(g_DstData);
 	return 0;
 }
 
@@ -1033,8 +1030,8 @@ static BOOL colordiff(UINT32 format, UINT32 a, UINT32 b)
 {
 	BYTE ar, ag, ab, aa;
 	BYTE br, bg, bb, ba;
-	SplitColor(a, format, &ar, &ag, &ab, &aa, NULL);
-	SplitColor(b, format, &br, &bg, &bb, &ba, NULL);
+	FreeRDPSplitColor(a, format, &ar, &ag, &ab, &aa, NULL);
+	FreeRDPSplitColor(b, format, &br, &bg, &bb, &ba, NULL);
 	if (!diff(aa, ba) || !diff(ar, br) || !diff(ag, bg) || !diff(ab, bb))
 		return FALSE;
 	return TRUE;
@@ -1042,7 +1039,6 @@ static BOOL colordiff(UINT32 format, UINT32 a, UINT32 b)
 
 static BOOL test_encode_decode(const char* path)
 {
-	int x, y;
 	BOOL res = FALSE;
 	int rc;
 	BYTE* resultData = NULL;
@@ -1090,17 +1086,17 @@ static BOOL test_encode_decode(const char* path)
 		dstImage->data = resultData;
 		winpr_image_write(dstImage, "/tmp/test.bmp");
 	}
-	for (y = 0; y < image->height; y++)
+	for (UINT32 y = 0; y < image->height; y++)
 	{
 		const BYTE* orig = &image->data[y * image->scanline];
 		const BYTE* dec = &resultData[y * image->scanline];
-		for (x = 0; x < image->width; x++)
+		for (UINT32 x = 0; x < image->width; x++)
 		{
 			const BYTE* po = &orig[x * 4];
 			const BYTE* pd = &dec[x * 4];
 
-			const DWORD a = ReadColor(po, ColorFormat);
-			const DWORD b = ReadColor(pd, ColorFormat);
+			const DWORD a = FreeRDPReadColor(po, ColorFormat);
+			const DWORD b = FreeRDPReadColor(pd, ColorFormat);
 			if (!colordiff(ColorFormat, a, b))
 			{
 				printf("xxxxxxx [%u:%u] %08X != %08X\n", x, y, a, b);

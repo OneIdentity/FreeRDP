@@ -52,8 +52,12 @@ static const char* pf_modules_get_filter_type_string(PF_FILTER_TYPE result)
 	{
 		case FILTER_TYPE_KEYBOARD:
 			return "FILTER_TYPE_KEYBOARD";
+		case FILTER_TYPE_UNICODE:
+			return "FILTER_TYPE_UNICODE";
 		case FILTER_TYPE_MOUSE:
 			return "FILTER_TYPE_MOUSE";
+		case FILTER_TYPE_MOUSE_EX:
+			return "FILTER_TYPE_MOUSE_EX";
 		case FILTER_TYPE_CLIENT_PASSTHROUGH_CHANNEL_DATA:
 			return "FILTER_TYPE_CLIENT_PASSTHROUGH_CHANNEL_DATA";
 		case FILTER_TYPE_SERVER_PASSTHROUGH_CHANNEL_DATA:
@@ -87,6 +91,8 @@ static const char* pf_modules_get_hook_type_string(PF_HOOK_TYPE result)
 			return "HOOK_TYPE_CLIENT_POST_CONNECT";
 		case HOOK_TYPE_CLIENT_POST_DISCONNECT:
 			return "HOOK_TYPE_CLIENT_POST_DISCONNECT";
+		case HOOK_TYPE_CLIENT_REDIRECT:
+			return "HOOK_TYPE_CLIENT_REDIRECT";
 		case HOOK_TYPE_CLIENT_VERIFY_X509:
 			return "HOOK_TYPE_CLIENT_VERIFY_X509";
 		case HOOK_TYPE_CLIENT_LOGIN_FAILURE:
@@ -103,6 +109,12 @@ static const char* pf_modules_get_hook_type_string(PF_HOOK_TYPE result)
 			return "HOOK_TYPE_SERVER_CHANNELS_FREE";
 		case HOOK_TYPE_SERVER_SESSION_END:
 			return "HOOK_TYPE_SERVER_SESSION_END";
+		case HOOK_TYPE_CLIENT_LOAD_CHANNELS:
+			return "HOOK_TYPE_CLIENT_LOAD_CHANNELS";
+		case HOOK_TYPE_SERVER_SESSION_INITIALIZE:
+			return "HOOK_TYPE_SERVER_SESSION_INITIALIZE";
+		case HOOK_TYPE_SERVER_SESSION_STARTED:
+			return "HOOK_TYPE_SERVER_SESSION_STARTED";
 		case HOOK_LAST:
 			return "HOOK_LAST";
 		default:
@@ -142,6 +154,10 @@ static BOOL pf_modules_proxy_ArrayList_ForEachFkt(void* data, size_t index, va_l
 			ok = IFCALLRESULT(TRUE, plugin->ClientPostConnect, plugin, pdata, custom);
 			break;
 
+		case HOOK_TYPE_CLIENT_REDIRECT:
+			ok = IFCALLRESULT(TRUE, plugin->ClientRedirect, plugin, pdata, custom);
+			break;
+
 		case HOOK_TYPE_CLIENT_POST_DISCONNECT:
 			ok = IFCALLRESULT(TRUE, plugin->ClientPostDisconnect, plugin, pdata, custom);
 			break;
@@ -156,6 +172,10 @@ static BOOL pf_modules_proxy_ArrayList_ForEachFkt(void* data, size_t index, va_l
 
 		case HOOK_TYPE_CLIENT_END_PAINT:
 			ok = IFCALLRESULT(TRUE, plugin->ClientEndPaint, plugin, pdata, custom);
+			break;
+
+		case HOOK_TYPE_CLIENT_LOAD_CHANNELS:
+			ok = IFCALLRESULT(TRUE, plugin->ClientLoadChannels, plugin, pdata, custom);
 			break;
 
 		case HOOK_TYPE_SERVER_POST_CONNECT:
@@ -176,6 +196,14 @@ static BOOL pf_modules_proxy_ArrayList_ForEachFkt(void* data, size_t index, va_l
 
 		case HOOK_TYPE_SERVER_SESSION_END:
 			ok = IFCALLRESULT(TRUE, plugin->ServerSessionEnd, plugin, pdata, custom);
+			break;
+
+		case HOOK_TYPE_SERVER_SESSION_INITIALIZE:
+			ok = IFCALLRESULT(TRUE, plugin->ServerSessionInitialize, plugin, pdata, custom);
+			break;
+
+		case HOOK_TYPE_SERVER_SESSION_STARTED:
+			ok = IFCALLRESULT(TRUE, plugin->ServerSessionStarted, plugin, pdata, custom);
 			break;
 
 		case HOOK_LAST:
@@ -220,7 +248,7 @@ static BOOL pf_modules_ArrayList_ForEachFkt(void* data, size_t index, va_list ap
 	pdata = va_arg(ap, proxyData*);
 	param = va_arg(ap, void*);
 
-	WLog_VRB(TAG, "[%s]: running filter: %s", __FUNCTION__, plugin->name);
+	WLog_VRB(TAG, "running filter: %s", plugin->name);
 
 	switch (type)
 	{
@@ -228,8 +256,16 @@ static BOOL pf_modules_ArrayList_ForEachFkt(void* data, size_t index, va_list ap
 			result = IFCALLRESULT(TRUE, plugin->KeyboardEvent, plugin, pdata, param);
 			break;
 
+		case FILTER_TYPE_UNICODE:
+			result = IFCALLRESULT(TRUE, plugin->UnicodeEvent, plugin, pdata, param);
+			break;
+
 		case FILTER_TYPE_MOUSE:
 			result = IFCALLRESULT(TRUE, plugin->MouseEvent, plugin, pdata, param);
+			break;
+
+		case FILTER_TYPE_MOUSE_EX:
+			result = IFCALLRESULT(TRUE, plugin->MouseExEvent, plugin, pdata, param);
 			break;
 
 		case FILTER_TYPE_CLIENT_PASSTHROUGH_CHANNEL_DATA:
@@ -254,6 +290,18 @@ static BOOL pf_modules_ArrayList_ForEachFkt(void* data, size_t index, va_list ap
 
 		case FILTER_TYPE_SERVER_PEER_LOGON:
 			result = IFCALLRESULT(TRUE, plugin->ServerPeerLogon, plugin, pdata, param);
+			break;
+
+		case FILTER_TYPE_INTERCEPT_CHANNEL:
+			result = IFCALLRESULT(TRUE, plugin->DynChannelIntercept, plugin, pdata, param);
+			break;
+
+		case FILTER_TYPE_DYN_INTERCEPT_LIST:
+			result = IFCALLRESULT(TRUE, plugin->DynChannelToIntercept, plugin, pdata, param);
+			break;
+
+		case FILTER_TYPE_STATIC_INTERCEPT_LIST:
+			result = IFCALLRESULT(TRUE, plugin->StaticChannelToIntercept, plugin, pdata, param);
 			break;
 
 		case FILTER_LAST:
@@ -293,7 +341,8 @@ BOOL pf_modules_run_filter(proxyModule* module, PF_FILTER_TYPE type, proxyData* 
 static BOOL pf_modules_set_plugin_data(proxyPluginsManager* mgr, const char* plugin_name,
                                        proxyData* pdata, void* data)
 {
-	union {
+	union
+	{
 		const char* ccp;
 		char* cp;
 	} ccharconv;
@@ -323,7 +372,8 @@ static BOOL pf_modules_set_plugin_data(proxyPluginsManager* mgr, const char* plu
 static void* pf_modules_get_plugin_data(proxyPluginsManager* mgr, const char* plugin_name,
                                         proxyData* pdata)
 {
-	union {
+	union
+	{
 		const char* ccp;
 		char* cp;
 	} ccharconv;
@@ -337,7 +387,7 @@ static void* pf_modules_get_plugin_data(proxyPluginsManager* mgr, const char* pl
 static void pf_modules_abort_connect(proxyPluginsManager* mgr, proxyData* pdata)
 {
 	WINPR_ASSERT(pdata);
-	WLog_DBG(TAG, "%s is called!", __FUNCTION__);
+	WLog_DBG(TAG, "is called!");
 	proxy_data_abort_connect(pdata);
 }
 
@@ -375,8 +425,7 @@ static BOOL pf_modules_register_plugin(proxyPluginsManager* mgr,
 
 	if (!ArrayList_Append(module->plugins, &internal))
 	{
-		WLog_ERR(TAG, "[%s]: failed adding plugin to list: %s", __FUNCTION__,
-		         plugin_to_register->name);
+		WLog_ERR(TAG, "failed adding plugin to list: %s", plugin_to_register->name);
 		return FALSE;
 	}
 
@@ -441,14 +490,14 @@ static BOOL pf_modules_load_module(const char* module_path, proxyModule* module,
 
 	if (handle == NULL)
 	{
-		WLog_ERR(TAG, "[%s]: failed loading external library: %s", __FUNCTION__, module_path);
+		WLog_ERR(TAG, "failed loading external library: %s", module_path);
 		return FALSE;
 	}
 
 	pEntryPoint = (proxyModuleEntryPoint)GetProcAddress(handle, MODULE_ENTRY_POINT);
 	if (!pEntryPoint)
 	{
-		WLog_ERR(TAG, "[%s]: GetProcAddress failed while loading %s", __FUNCTION__, module_path);
+		WLog_ERR(TAG, "GetProcAddress failed while loading %s", module_path);
 		goto error;
 	}
 	if (!ArrayList_Append(module->handles, handle))
@@ -508,7 +557,7 @@ proxyModule* pf_modules_new(const char* root_dir, const char** modules, size_t c
 
 	if (module->plugins == NULL)
 	{
-		WLog_ERR(TAG, "[%s]: ArrayList_New failed!", __FUNCTION__);
+		WLog_ERR(TAG, "ArrayList_New failed!");
 		goto error;
 	}
 	obj = ArrayList_Object(module->plugins);
@@ -521,7 +570,7 @@ proxyModule* pf_modules_new(const char* root_dir, const char** modules, size_t c
 	if (module->handles == NULL)
 	{
 
-		WLog_ERR(TAG, "[%s]: ArrayList_New failed!", __FUNCTION__);
+		WLog_ERR(TAG, "ArrayList_New failed!");
 		goto error;
 	}
 	ArrayList_Object(module->handles)->fnObjectFree = free_handle;

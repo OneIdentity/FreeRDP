@@ -23,14 +23,13 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <winpr/crt.h>
 
 #include <freerdp/types.h>
 #include <freerdp/constants.h>
+#include <freerdp/freerdp.h>
 
 #include "rail_orders.h"
 #include "rail_main.h"
@@ -616,7 +615,6 @@ static UINT rail_virtual_channel_event_disconnected(railPlugin* rail)
 	}
 
 	rail->OpenHandle = 0;
-
 
 	return CHANNEL_RC_OK;
 }

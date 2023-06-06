@@ -55,7 +55,7 @@
 #endif
 #endif
 
-#ifdef BUILD_TESTING
+#if defined(EXPORT_ALL_SYMBOLS)
 #define FREERDP_LOCAL FREERDP_API
 #else
 #if defined _WIN32 || defined __CYGWIN__
@@ -67,12 +67,6 @@
 #define FREERDP_LOCAL
 #endif
 #endif
-#endif
-
-#ifdef FREERDP_TEST_EXPORTS
-#define FREERDP_TEST_API FREERDP_API
-#else
-#define FREERDP_TEST_API
 #endif
 
 #define IFCALL(_cb, ...)      \
@@ -93,5 +87,15 @@
 	} while (0)
 #define IFCALLRESULT(_default_return, _cb, ...) \
 	((_cb != NULL) ? _cb(__VA_ARGS__) : (_default_return))
+
+#ifdef __GNUC__
+#define ALIGN64 __attribute__((aligned(8)))
+#else
+#ifdef _WIN32
+#define ALIGN64 __declspec(align(8))
+#else
+#define ALIGN64
+#endif
+#endif
 
 #endif /* FREERDP_API */

@@ -19,9 +19,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,12 +33,13 @@
 
 #include <freerdp/types.h>
 #include <freerdp/addin.h>
+#include <freerdp/freerdp.h>
 #include <freerdp/codec/audio.h>
 #include <freerdp/client/audin.h>
 
 #include "audin_main.h"
 
-typedef struct _AudinPulseDevice
+typedef struct
 {
 	IAudinDevice iface;
 
@@ -229,17 +228,6 @@ static BOOL audin_pulse_format_supported(IAudinDevice* device, const AUDIO_FORMA
 		case WAVE_FORMAT_PCM:
 			if (format->cbSize == 0 && (format->nSamplesPerSec <= PA_RATE_MAX) &&
 			    (format->wBitsPerSample == 8 || format->wBitsPerSample == 16) &&
-			    (format->nChannels >= 1 && format->nChannels <= PA_CHANNELS_MAX))
-			{
-				return TRUE;
-			}
-
-			break;
-
-		case WAVE_FORMAT_ALAW:  /* A-LAW */
-		case WAVE_FORMAT_MULAW: /* U-LAW */
-			if (format->cbSize == 0 && (format->nSamplesPerSec <= PA_RATE_MAX) &&
-			    (format->wBitsPerSample == 8) &&
 			    (format->nChannels >= 1 && format->nChannels <= PA_CHANNELS_MAX))
 			{
 				return TRUE;
@@ -505,18 +493,12 @@ static UINT audin_pulse_parse_addin_args(AudinPulseDevice* device, const ADDIN_A
 	return CHANNEL_RC_OK;
 }
 
-#ifdef BUILTIN_CHANNELS
-#define freerdp_audin_client_subsystem_entry pulse_freerdp_audin_client_subsystem_entry
-#else
-#define freerdp_audin_client_subsystem_entry FREERDP_API freerdp_audin_client_subsystem_entry
-#endif
-
 /**
  * Function description
  *
  * @return 0 on success, otherwise a Win32 error code
  */
-UINT freerdp_audin_client_subsystem_entry(PFREERDP_AUDIN_DEVICE_ENTRY_POINTS pEntryPoints)
+UINT pulse_freerdp_audin_client_subsystem_entry(PFREERDP_AUDIN_DEVICE_ENTRY_POINTS pEntryPoints)
 {
 	const ADDIN_ARGV* args;
 	AudinPulseDevice* pulse;

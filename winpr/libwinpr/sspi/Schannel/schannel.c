@@ -17,9 +17,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <winpr/config.h>
 
 #include <winpr/crt.h>
 #include <winpr/sspi.h>
@@ -27,7 +25,7 @@
 #include "schannel.h"
 
 #include "../sspi.h"
-#include "../log.h"
+#include "../../log.h"
 
 static char* SCHANNEL_PACKAGE_NAME = "Schannel";
 
@@ -116,7 +114,7 @@ static SECURITY_STATUS SEC_ENTRY schannel_QueryCredentialsAttributesW(PCredHandl
 		return SEC_E_OK;
 	}
 
-	WLog_ERR(TAG, "[%s]: TODO: Implement ulAttribute=%08" PRIx32, __FUNCTION__, ulAttribute);
+	WLog_ERR(TAG, "TODO: Implement ulAttribute=%08" PRIx32, ulAttribute);
 	return SEC_E_UNSUPPORTED_FUNCTION;
 }
 
@@ -170,8 +168,11 @@ static SECURITY_STATUS SEC_ENTRY schannel_AcquireCredentialsHandleA(
 	SECURITY_STATUS status;
 	SEC_WCHAR* pszPrincipalW = NULL;
 	SEC_WCHAR* pszPackageW = NULL;
-	ConvertToUnicode(CP_UTF8, 0, pszPrincipal, -1, &pszPrincipalW, 0);
-	ConvertToUnicode(CP_UTF8, 0, pszPackage, -1, &pszPackageW, 0);
+	if (pszPrincipal)
+		pszPrincipalW = ConvertUtf8ToWCharAlloc(pszPrincipal, NULL);
+	if (pszPackage)
+		pszPackageW = ConvertUtf8ToWCharAlloc(pszPackage, NULL);
+
 	status = schannel_AcquireCredentialsHandleW(pszPrincipalW, pszPackageW, fCredentialUse,
 	                                            pvLogonID, pAuthData, pGetKeyFn, pvGetKeyArgument,
 	                                            phCredential, ptsExpiry);
@@ -204,6 +205,11 @@ static SECURITY_STATUS SEC_ENTRY schannel_InitializeSecurityContextW(
 	SECURITY_STATUS status;
 	SCHANNEL_CONTEXT* context;
 	SCHANNEL_CREDENTIALS* credentials;
+
+	/* behave like windows SSPIs that don't want empty context */
+	if (phContext && !phContext->dwLower && !phContext->dwUpper)
+		return SEC_E_INVALID_HANDLE;
+
 	context = sspi_SecureHandleGetLowerPointer(phContext);
 
 	if (!context)
@@ -235,7 +241,9 @@ static SECURITY_STATUS SEC_ENTRY schannel_InitializeSecurityContextA(
 
 	if (pszTargetName != NULL)
 	{
-		ConvertToUnicode(CP_UTF8, 0, pszTargetName, -1, &pszTargetNameW, 0);
+		pszTargetNameW = ConvertUtf8ToWCharAlloc(pszTargetName, NULL);
+		if (!pszTargetNameW)
+			return SEC_E_INSUFFICIENT_MEMORY;
 	}
 
 	status = schannel_InitializeSecurityContextW(
@@ -252,6 +260,11 @@ static SECURITY_STATUS SEC_ENTRY schannel_AcceptSecurityContext(
 {
 	SECURITY_STATUS status;
 	SCHANNEL_CONTEXT* context;
+
+	/* behave like windows SSPIs that don't want empty context */
+	if (phContext && !phContext->dwLower && !phContext->dwUpper)
+		return SEC_E_INVALID_HANDLE;
+
 	context = (SCHANNEL_CONTEXT*)sspi_SecureHandleGetLowerPointer(phContext);
 
 	if (!context)
@@ -312,7 +325,7 @@ static SECURITY_STATUS SEC_ENTRY schannel_QueryContextAttributes(PCtxtHandle phC
 		return SEC_E_OK;
 	}
 
-	WLog_ERR(TAG, "[%s]: TODO: Implement ulAttribute=%08" PRIx32, __FUNCTION__, ulAttribute);
+	WLog_ERR(TAG, "TODO: Implement ulAttribute=%08" PRIx32, ulAttribute);
 	return SEC_E_UNSUPPORTED_FUNCTION;
 }
 
@@ -360,7 +373,7 @@ static SECURITY_STATUS SEC_ENTRY schannel_DecryptMessage(PCtxtHandle phContext,
 }
 
 const SecurityFunctionTableA SCHANNEL_SecurityFunctionTableA = {
-	1,                                    /* dwVersion */
+	3,                                    /* dwVersion */
 	NULL,                                 /* EnumerateSecurityPackages */
 	schannel_QueryCredentialsAttributesA, /* QueryCredentialsAttributes */
 	schannel_AcquireCredentialsHandleA,   /* AcquireCredentialsHandle */
@@ -388,10 +401,11 @@ const SecurityFunctionTableA SCHANNEL_SecurityFunctionTableA = {
 	schannel_EncryptMessage,              /* EncryptMessage */
 	schannel_DecryptMessage,              /* DecryptMessage */
 	NULL,                                 /* SetContextAttributes */
+	NULL,                                 /* SetCredentialsAttributes */
 };
 
 const SecurityFunctionTableW SCHANNEL_SecurityFunctionTableW = {
-	1,                                    /* dwVersion */
+	3,                                    /* dwVersion */
 	NULL,                                 /* EnumerateSecurityPackages */
 	schannel_QueryCredentialsAttributesW, /* QueryCredentialsAttributes */
 	schannel_AcquireCredentialsHandleW,   /* AcquireCredentialsHandle */
@@ -419,6 +433,7 @@ const SecurityFunctionTableW SCHANNEL_SecurityFunctionTableW = {
 	schannel_EncryptMessage,              /* EncryptMessage */
 	schannel_DecryptMessage,              /* DecryptMessage */
 	NULL,                                 /* SetContextAttributes */
+	NULL,                                 /* SetCredentialsAttributes */
 };
 
 const SecPkgInfoA SCHANNEL_SecPkgInfoA = {

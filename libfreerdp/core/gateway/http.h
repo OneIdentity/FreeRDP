@@ -21,12 +21,64 @@
 #define FREERDP_LIB_CORE_GATEWAY_HTTP_H
 
 #include <winpr/stream.h>
-#include <winpr/winhttp.h>
 
 #include <freerdp/api.h>
-#include <freerdp/crypto/tls.h>
 
-typedef enum _TRANSFER_ENCODING
+#include "../../crypto/tls.h"
+
+typedef enum
+{
+	HTTP_STATUS_CONTINUE = 100,
+	HTTP_STATUS_SWITCH_PROTOCOLS = 101
+
+	,
+	HTTP_STATUS_OK = 200,
+	HTTP_STATUS_CREATED = 201,
+	HTTP_STATUS_ACCEPTED = 202,
+	HTTP_STATUS_PARTIAL = 203,
+	HTTP_STATUS_NO_CONTENT = 204,
+	HTTP_STATUS_RESET_CONTENT = 205,
+	HTTP_STATUS_PARTIAL_CONTENT = 206,
+	HTTP_STATUS_WEBDAV_MULTI_STATUS = 207
+
+	,
+	HTTP_STATUS_AMBIGUOUS = 300,
+	HTTP_STATUS_MOVED = 301,
+	HTTP_STATUS_REDIRECT = 302,
+	HTTP_STATUS_REDIRECT_METHOD = 303,
+	HTTP_STATUS_NOT_MODIFIED = 304,
+	HTTP_STATUS_USE_PROXY = 305,
+	HTTP_STATUS_REDIRECT_KEEP_VERB = 307
+
+	,
+	HTTP_STATUS_BAD_REQUEST = 400,
+	HTTP_STATUS_DENIED = 401,
+	HTTP_STATUS_PAYMENT_REQ = 402,
+	HTTP_STATUS_FORBIDDEN = 403,
+	HTTP_STATUS_NOT_FOUND = 404,
+	HTTP_STATUS_BAD_METHOD = 405,
+	HTTP_STATUS_NONE_ACCEPTABLE = 406,
+	HTTP_STATUS_PROXY_AUTH_REQ = 407,
+	HTTP_STATUS_REQUEST_TIMEOUT = 408,
+	HTTP_STATUS_CONFLICT = 409,
+	HTTP_STATUS_GONE = 410,
+	HTTP_STATUS_LENGTH_REQUIRED = 411,
+	HTTP_STATUS_PRECOND_FAILED = 412,
+	HTTP_STATUS_REQUEST_TOO_LARGE = 413,
+	HTTP_STATUS_URI_TOO_LONG = 414,
+	HTTP_STATUS_UNSUPPORTED_MEDIA = 415,
+	HTTP_STATUS_RETRY_WITH = 449
+
+	,
+	HTTP_STATUS_SERVER_ERROR = 500,
+	HTTP_STATUS_NOT_SUPPORTED = 501,
+	HTTP_STATUS_BAD_GATEWAY = 502,
+	HTTP_STATUS_SERVICE_UNAVAIL = 503,
+	HTTP_STATUS_GATEWAY_TIMEOUT = 504,
+	HTTP_STATUS_VERSION_NOT_SUP = 505
+} HTTP_STATUS;
+
+typedef enum
 {
 	TransferEncodingUnknown,
 	TransferEncodingIdentity,
@@ -34,7 +86,7 @@ typedef enum _TRANSFER_ENCODING
 } TRANSFER_ENCODING;
 
 /* HTTP context */
-typedef struct _http_context HttpContext;
+typedef struct s_http_context HttpContext;
 
 FREERDP_LOCAL HttpContext* http_context_new(void);
 FREERDP_LOCAL void http_context_free(HttpContext* context);
@@ -56,7 +108,7 @@ FREERDP_LOCAL BOOL http_context_enable_websocket_upgrade(HttpContext* context, B
 FREERDP_LOCAL BOOL http_context_is_websocket_upgrade_enabled(HttpContext* context);
 
 /* HTTP request */
-typedef struct _http_request HttpRequest;
+typedef struct s_http_request HttpRequest;
 
 FREERDP_LOCAL HttpRequest* http_request_new(void);
 FREERDP_LOCAL void http_request_free(HttpRequest* request);
@@ -75,7 +127,7 @@ FREERDP_LOCAL BOOL http_request_set_transfer_encoding(HttpRequest* request,
 FREERDP_LOCAL wStream* http_request_write(HttpContext* context, HttpRequest* request);
 
 /* HTTP response */
-typedef struct _http_response HttpResponse;
+typedef struct s_http_response HttpResponse;
 
 FREERDP_LOCAL HttpResponse* http_response_new(void);
 FREERDP_LOCAL void http_response_free(HttpResponse* response);
@@ -88,5 +140,8 @@ FREERDP_LOCAL SSIZE_T http_response_get_body_length(HttpResponse* response);
 FREERDP_LOCAL const char* http_response_get_auth_token(HttpResponse* response, const char* method);
 FREERDP_LOCAL TRANSFER_ENCODING http_response_get_transfer_encoding(HttpResponse* response);
 FREERDP_LOCAL BOOL http_response_is_websocket(HttpContext* http, HttpResponse* response);
+
+FREERDP_LOCAL const char* http_status_string(long status);
+FREERDP_LOCAL char* http_status_string_format(long status, char* buffer, size_t size);
 
 #endif /* FREERDP_LIB_CORE_GATEWAY_HTTP_H */

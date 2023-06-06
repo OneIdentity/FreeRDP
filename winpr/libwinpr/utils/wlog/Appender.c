@@ -17,9 +17,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <winpr/config.h>
 
 #include "Appender.h"
 
@@ -114,12 +112,12 @@ static wLogAppender* WLog_Appender_New(wLog* log, DWORD logAppenderType)
 		case WLOG_APPENDER_CALLBACK:
 			appender = WLog_CallbackAppender_New(log);
 			break;
-#ifdef HAVE_SYSLOG_H
+#ifdef WINPR_HAVE_SYSLOG_H
 		case WLOG_APPENDER_SYSLOG:
 			appender = WLog_SyslogAppender_New(log);
 			break;
 #endif
-#ifdef HAVE_JOURNALD_H
+#ifdef WINPR_HAVE_JOURNALD_H
 		case WLOG_APPENDER_JOURNALD:
 			appender = WLog_JournaldAppender_New(log);
 			break;

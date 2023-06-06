@@ -19,9 +19,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <winpr/config.h>
 
 #include "BinaryAppender.h"
 #include <winpr/crt.h>
@@ -30,7 +28,7 @@
 #include <winpr/path.h>
 #include <winpr/stream.h>
 
-struct _wLogBinaryAppender
+typedef struct
 {
 	WLOG_APPENDER_COMMON();
 
@@ -38,8 +36,7 @@ struct _wLogBinaryAppender
 	char* FilePath;
 	char* FullFileName;
 	FILE* FileDescriptor;
-};
-typedef struct _wLogBinaryAppender wLogBinaryAppender;
+} wLogBinaryAppender;
 
 static BOOL WLog_BinaryAppender_Open(wLog* log, wLogAppender* appender)
 {
@@ -97,7 +94,8 @@ static BOOL WLog_BinaryAppender_Close(wLog* log, wLogAppender* appender)
 	if (!binaryAppender->FileDescriptor)
 		return TRUE;
 
-	fclose(binaryAppender->FileDescriptor);
+	if (binaryAppender->FileDescriptor)
+		fclose(binaryAppender->FileDescriptor);
 
 	binaryAppender->FileDescriptor = NULL;
 

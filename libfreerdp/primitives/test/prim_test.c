@@ -12,9 +12,7 @@
  * permissions and limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include "prim_test.h"
 
@@ -27,10 +25,6 @@
 #include <winpr/sysinfo.h>
 #include <winpr/platform.h>
 #include <winpr/crypto.h>
-
-#ifdef HAVE_UNISTD_H
-#include <unistd.h>
-#endif
 
 primitives_t* generic = NULL;
 primitives_t* optimized = NULL;
@@ -75,19 +69,19 @@ void _floatprint(float t, char* output)
 		f *= 10.0;
 
 	f /= 1000.0;
-	i = ((int)(t / f + 0.5)) * (int)f;
+	i = ((int)(t / f + 0.5f)) * (int)f;
 
-	if (t < 0.0)
+	if (t < 0.0f)
 		sprintf(output, "%f", t);
 	else if (i == 0)
-		sprintf(output, "%d", (int)(t + 0.5));
-	else if (t < 1e+3)
+		sprintf(output, "%d", (int)(t + 0.5f));
+	else if (t < 1e+3f)
 		sprintf(output, "%3d", i);
-	else if (t < 1e+6)
+	else if (t < 1e+6f)
 		sprintf(output, "%3d,%03d", i / 1000, i % 1000);
-	else if (t < 1e+9)
+	else if (t < 1e+9f)
 		sprintf(output, "%3d,%03d,000", i / 1000000, (i % 1000000) / 1000);
-	else if (t < 1e+12)
+	else if (t < 1e+12f)
 		sprintf(output, "%3d,%03d,000,000", i / 1000000000, (i % 1000000000) / 1000000);
 	else
 		sprintf(output, "%f", t);

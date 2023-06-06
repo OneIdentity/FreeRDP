@@ -1293,7 +1293,7 @@ static INLINE NTSTATUS NTSTATUS_FROM_WIN32(long x)
 #endif
 
 #ifndef __MINGW32__
-typedef enum _FILE_INFORMATION_CLASS
+typedef enum
 {
 	FileDirectoryInformation = 1,
 	FileFullDirectoryInformation,
@@ -1338,6 +1338,16 @@ typedef enum _FILE_INFORMATION_CLASS
 } FILE_INFORMATION_CLASS;
 #endif /* !__MINGW32__ */
 
+#if !defined(_WIN32) || defined(__MINGW32__)
+/* defined in <winternl.h> */
+#define FILE_SUPERSEDED 0x00000000
+#define FILE_OPENED 0x00000001
+#define FILE_CREATED 0x00000002
+#define FILE_OVERWRITTEN 0x00000003
+#define FILE_EXISTS 0x00000004
+#define FILE_DOES_NOT_EXIST 0x00000005
+#endif
+
 #if !defined(_WIN32) || defined(_UWP)
 
 #define FILE_SUPERSEDE 0x00000000
@@ -1380,16 +1390,9 @@ typedef enum _FILE_INFORMATION_CLASS
 #define FILE_VALID_MAILSLOT_OPTION_FLAGS 0x00000032
 #define FILE_VALID_SET_FLAGS 0x00000036
 
-#define FILE_SUPERSEDED 0x00000000
-#define FILE_OPENED 0x00000001
-#define FILE_CREATED 0x00000002
-#define FILE_OVERWRITTEN 0x00000003
-#define FILE_EXISTS 0x00000004
-#define FILE_DOES_NOT_EXIST 0x00000005
-
 typedef CONST char* PCSZ;
 
-typedef struct _STRING
+typedef struct
 {
 	USHORT Length;
 	USHORT MaximumLength;
@@ -1405,7 +1408,7 @@ typedef STRING OEM_STRING;
 typedef PSTRING POEM_STRING;
 typedef CONST STRING* PCOEM_STRING;
 
-typedef struct _LSA_UNICODE_STRING
+typedef struct
 {
 	USHORT Length;
 	USHORT MaximumLength;
@@ -1422,7 +1425,7 @@ typedef struct _LSA_UNICODE_STRING
 #define OBJ_FORCE_ACCESS_CHECK 0x00000400L
 #define OBJ_VALID_ATTRIBUTES 0x000007F2L
 
-typedef struct _OBJECT_ATTRIBUTES
+typedef struct
 {
 	ULONG Length;
 	HANDLE RootDirectory;
@@ -1433,9 +1436,10 @@ typedef struct _OBJECT_ATTRIBUTES
 } OBJECT_ATTRIBUTES;
 typedef OBJECT_ATTRIBUTES* POBJECT_ATTRIBUTES;
 
-typedef struct _IO_STATUS_BLOCK
+typedef struct
 {
-	union {
+	union
+	{
 #ifdef _WIN32
 		NTSTATUS Status;
 #else
@@ -1452,24 +1456,23 @@ typedef VOID (*PIO_APC_ROUTINE)(PVOID ApcContext, PIO_STATUS_BLOCK IoStatusBlock
 
 #if !defined(_WIN32)
 
-typedef struct _PEB PEB;
-typedef struct _PEB* PPEB;
+typedef struct S_PEB PEB;
+typedef struct S_PEB* PPEB;
 
-typedef struct _TEB TEB;
-typedef struct _TEB* PTEB;
+typedef struct S_TEB TEB;
+typedef struct S_TEB* PTEB;
 
 /**
  * Process Environment Block
  */
 
-struct _THREAD_BLOCK_ID
+typedef struct
 {
 	DWORD ThreadId;
 	TEB* ThreadEnvironmentBlock;
-};
-typedef struct _THREAD_BLOCK_ID THREAD_BLOCK_ID;
+} THREAD_BLOCK_ID;
 
-struct _PEB
+struct S_PEB
 {
 	DWORD ThreadCount;
 	DWORD ThreadArraySize;
@@ -1480,7 +1483,7 @@ struct _PEB
  * Thread Environment Block
  */
 
-struct _TEB
+struct S_TEB
 {
 	PEB* ProcessEnvironmentBlock;
 
@@ -1556,55 +1559,8 @@ extern "C"
 {
 #endif
 
-	WINPR_API VOID _RtlInitAnsiString(PANSI_STRING DestinationString, PCSZ SourceString);
-
-	WINPR_API VOID _RtlInitUnicodeString(PUNICODE_STRING DestinationString, PCWSTR SourceString);
-
-	WINPR_API NTSTATUS _RtlAnsiStringToUnicodeString(PUNICODE_STRING DestinationString,
-	                                                 PCANSI_STRING SourceString,
-	                                                 BOOLEAN AllocateDestinationString);
-
-	WINPR_API VOID _RtlFreeUnicodeString(PUNICODE_STRING UnicodeString);
-
-	WINPR_API ULONG _RtlNtStatusToDosError(NTSTATUS status);
-
-	WINPR_API VOID _InitializeObjectAttributes(POBJECT_ATTRIBUTES InitializedAttributes,
-	                                           PUNICODE_STRING ObjectName, ULONG Attributes,
-	                                           HANDLE RootDirectory,
-	                                           PSECURITY_DESCRIPTOR SecurityDescriptor);
-
-	WINPR_API NTSTATUS _NtCreateFile(PHANDLE FileHandle, ACCESS_MASK DesiredAccess,
-	                                 POBJECT_ATTRIBUTES ObjectAttributes,
-	                                 PIO_STATUS_BLOCK IoStatusBlock, PLARGE_INTEGER AllocationSize,
-	                                 ULONG FileAttributes, ULONG ShareAccess,
-	                                 ULONG CreateDisposition, ULONG CreateOptions, PVOID EaBuffer,
-	                                 ULONG EaLength);
-
-	WINPR_API NTSTATUS _NtOpenFile(PHANDLE FileHandle, ACCESS_MASK DesiredAccess,
-	                               POBJECT_ATTRIBUTES ObjectAttributes,
-	                               PIO_STATUS_BLOCK IoStatusBlock, ULONG ShareAccess,
-	                               ULONG OpenOptions);
-
-	WINPR_API NTSTATUS _NtReadFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE ApcRoutine,
-	                               PVOID ApcContext, PIO_STATUS_BLOCK IoStatusBlock, PVOID Buffer,
-	                               ULONG Length, PLARGE_INTEGER ByteOffset, PULONG Key);
-
-	WINPR_API NTSTATUS _NtWriteFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE ApcRoutine,
-	                                PVOID ApcContext, PIO_STATUS_BLOCK IoStatusBlock, PVOID Buffer,
-	                                ULONG Length, PLARGE_INTEGER ByteOffset, PULONG Key);
-
-	WINPR_API NTSTATUS _NtDeviceIoControlFile(HANDLE FileHandle, HANDLE Event,
-	                                          PIO_APC_ROUTINE ApcRoutine, PVOID ApcContext,
-	                                          PIO_STATUS_BLOCK IoStatusBlock, ULONG IoControlCode,
-	                                          PVOID InputBuffer, ULONG InputBufferLength,
-	                                          PVOID OutputBuffer, ULONG OutputBufferLength);
-
-	WINPR_API NTSTATUS _NtClose(HANDLE Handle);
-
-	WINPR_API NTSTATUS _NtWaitForSingleObject(HANDLE Handle, BOOLEAN Alertable,
-	                                          PLARGE_INTEGER Timeout);
-
 	WINPR_API const char* NtStatus2Tag(DWORD ntstatus);
+	WINPR_API const char* Win32ErrorCode2Tag(UINT16 code);
 
 #ifdef __cplusplus
 }

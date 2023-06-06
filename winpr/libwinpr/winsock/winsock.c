@@ -17,22 +17,20 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <winpr/config.h>
 
 #include <winpr/crt.h>
 #include <winpr/synch.h>
 
 #include <winpr/winsock.h>
 
-#ifdef HAVE_UNISTD_H
+#ifdef WINPR_HAVE_UNISTD_H
 #include <unistd.h>
 #endif
-#ifdef HAVE_SYS_FILIO_H
+#ifdef WINPR_HAVE_SYS_FILIO_H
 #include <sys/filio.h>
 #endif
-#ifdef HAVE_SYS_SOCKIO_H
+#ifdef WINPR_HAVE_SYS_SOCKIO_H
 #include <sys/sockio.h>
 #endif
 
@@ -238,8 +236,8 @@ PCSTR winpr_inet_ntop(INT Family, PVOID pAddr, PSTR pStringBuf, size_t StringBuf
 {
 	if (Family == AF_INET)
 	{
-		struct sockaddr_in in;
-		memset(&in, 0, sizeof(in));
+		struct sockaddr_in in = { 0 };
+
 		in.sin_family = AF_INET;
 		memcpy(&in.sin_addr, pAddr, sizeof(struct in_addr));
 		getnameinfo((struct sockaddr*)&in, sizeof(struct sockaddr_in), pStringBuf, StringBufSize,
@@ -248,8 +246,8 @@ PCSTR winpr_inet_ntop(INT Family, PVOID pAddr, PSTR pStringBuf, size_t StringBuf
 	}
 	else if (Family == AF_INET6)
 	{
-		struct sockaddr_in6 in;
-		memset(&in, 0, sizeof(in));
+		struct sockaddr_in6 in = { 0 };
+
 		in.sin6_family = AF_INET6;
 		memcpy(&in.sin6_addr, pAddr, sizeof(struct in_addr6));
 		getnameinfo((struct sockaddr*)&in, sizeof(struct sockaddr_in6), pStringBuf, StringBufSize,
@@ -297,12 +295,16 @@ INT winpr_inet_pton(INT Family, PCSTR pszAddrString, PVOID pAddrBuf)
 #include <netinet/tcp.h>
 #include <net/if.h>
 
+#include <winpr/assert.h>
+
 #ifndef MSG_NOSIGNAL
 #define MSG_NOSIGNAL 0
 #endif
 
 int WSAStartup(WORD wVersionRequired, LPWSADATA lpWSAData)
 {
+	WINPR_ASSERT(lpWSAData);
+
 	ZeroMemory(lpWSAData, sizeof(WSADATA));
 	lpWSAData->wVersion = wVersionRequired;
 	lpWSAData->wHighVersion = MAKEWORD(2, 2);
@@ -987,7 +989,7 @@ int WSAIoctl(SOCKET s, DWORD dwIoControlCode, LPVOID lpvInBuffer, DWORD cbInBuff
 		inet_pton(ifreq->ifr_addr.sa_family, netmask, (void*)&pNetmask->sin_addr);
 		numInterfaces++;
 	next_ifreq:
-#if !defined(__linux__) && !defined(__sun__) && !defined(__CYGWIN__)
+#if !defined(__linux__) && !defined(__sun__) && !defined(__CYGWIN__) && !defined(EMSCRIPTEN)
 		ifreq_len = IFNAMSIZ + ifreq->ifr_addr.sa_len;
 #else
 		ifreq_len = sizeof(*ifreq);
@@ -1158,10 +1160,15 @@ int _select(int nfds, fd_set* readfds, fd_set* writefds, fd_set* exceptfds,
             const struct timeval* timeout)
 {
 	int status;
-
+	union
+	{
+		const struct timeval* cpv;
+		struct timeval* pv;
+	} cnv;
+	cnv.cpv = timeout;
 	do
 	{
-		status = select(nfds, readfds, writefds, exceptfds, (struct timeval*)timeout);
+		status = select(nfds, readfds, writefds, exceptfds, cnv.pv);
 	} while ((status < 0) && (errno == EINTR));
 
 	return status;

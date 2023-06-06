@@ -19,11 +19,10 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <winpr/crt.h>
+#include <winpr/assert.h>
 #include <winpr/path.h>
 #include <winpr/string.h>
 #include <winpr/file.h>
@@ -31,6 +30,7 @@
 #include <winpr/library.h>
 #include <winpr/collections.h>
 
+#include <freerdp/freerdp.h>
 #include <freerdp/addin.h>
 #include <freerdp/build-config.h>
 #include <freerdp/client/channels.h>
@@ -146,6 +146,21 @@ error_out:
 	return NULL;
 }
 
+static HANDLE FindFirstFileUTF8(LPCSTR pszSearchPath, WIN32_FIND_DATAW* FindData)
+{
+	HANDLE hdl = INVALID_HANDLE_VALUE;
+	if (!pszSearchPath)
+		return hdl;
+	WCHAR* wpath = ConvertUtf8ToWCharAlloc(pszSearchPath, NULL);
+	if (!wpath)
+		return hdl;
+
+	hdl = FindFirstFileW(wpath, FindData);
+	free(wpath);
+
+	return hdl;
+}
+
 static FREERDP_ADDIN** freerdp_channels_list_dynamic_addins(LPCSTR pszName, LPCSTR pszSubsystem,
                                                             LPCSTR pszType, DWORD dwFlags)
 {
@@ -163,7 +178,7 @@ static FREERDP_ADDIN** freerdp_channels_list_dynamic_addins(LPCSTR pszName, LPCS
 	size_t cchAddinPath;
 	size_t cchInstallPrefix;
 	FREERDP_ADDIN** ppAddins;
-	WIN32_FIND_DATAA FindData;
+	WIN32_FIND_DATAW FindData = { 0 };
 	cchAddinPath = strnlen(pszAddinPath, sizeof(FREERDP_ADDIN_PATH));
 	cchInstallPrefix = strnlen(pszInstallPrefix, sizeof(FREERDP_INSTALL_PREFIX));
 	pszExtension = PathGetSharedLibraryExtensionA(0);
@@ -213,7 +228,9 @@ static FREERDP_ADDIN** freerdp_channels_list_dynamic_addins(LPCSTR pszName, LPCS
 	NativePathCchAppendA(pszSearchPath, cchSearchPath + 1, pszAddinPath);
 	NativePathCchAppendA(pszSearchPath, cchSearchPath + 1, pszPattern);
 	free(pszPattern);
-	hFind = FindFirstFileA(pszSearchPath, &FindData);
+
+	hFind = FindFirstFileUTF8(pszSearchPath, &FindData);
+
 	free(pszSearchPath);
 	nAddins = 0;
 	ppAddins = (FREERDP_ADDIN**)calloc(128, sizeof(FREERDP_ADDIN*));
@@ -230,10 +247,9 @@ static FREERDP_ADDIN** freerdp_channels_list_dynamic_addins(LPCSTR pszName, LPCS
 
 	do
 	{
-		char* p[5];
-		FREERDP_ADDIN* pAddin;
-		nDashes = 0;
-		pAddin = (FREERDP_ADDIN*)calloc(1, sizeof(FREERDP_ADDIN));
+		char* cFileName = NULL;
+		BOOL used = FALSE;
+		FREERDP_ADDIN* pAddin = (FREERDP_ADDIN*)calloc(1, sizeof(FREERDP_ADDIN));
 
 		if (!pAddin)
 		{
@@ -241,58 +257,147 @@ static FREERDP_ADDIN** freerdp_channels_list_dynamic_addins(LPCSTR pszName, LPCS
 			goto error_out;
 		}
 
-		for (index = 0; FindData.cFileName[index]; index++)
-			nDashes += (FindData.cFileName[index] == '-') ? 1 : 0;
+		cFileName =
+		    ConvertWCharNToUtf8Alloc(FindData.cFileName, ARRAYSIZE(FindData.cFileName), NULL);
+		if (!cFileName)
+			goto skip;
+
+		nDashes = 0;
+		for (index = 0; cFileName[index]; index++)
+			nDashes += (cFileName[index] == '-') ? 1 : 0;
 
 		if (nDashes == 1)
 		{
+			size_t len;
+			char* p[2] = { 0 };
 			/* <name>-client.<extension> */
-			p[0] = FindData.cFileName;
-			p[1] = strchr(p[0], '-') + 1;
-			strncpy(pAddin->cName, p[0], (size_t)((p[1] - p[0]) - 1));
+			p[0] = cFileName;
+			p[1] = strchr(p[0], '-');
+			if (!p[1])
+				goto skip;
+			p[1] += 1;
+
+			len = (size_t)(p[1] - p[0]);
+			if (len < 1)
+			{
+				WLog_WARN(TAG, "Skipping file '%s', invalid format", cFileName);
+				goto skip;
+			}
+			strncpy(pAddin->cName, p[0], MIN(ARRAYSIZE(pAddin->cName), len - 1));
+
 			pAddin->dwFlags = FREERDP_ADDIN_CLIENT;
 			pAddin->dwFlags |= FREERDP_ADDIN_DYNAMIC;
 			pAddin->dwFlags |= FREERDP_ADDIN_NAME;
 			ppAddins[nAddins++] = pAddin;
+
+			used = TRUE;
 		}
 		else if (nDashes == 2)
 		{
+			size_t len;
+			char* p[4] = { 0 };
 			/* <name>-client-<subsystem>.<extension> */
-			p[0] = FindData.cFileName;
-			p[1] = strchr(p[0], '-') + 1;
-			p[2] = strchr(p[1], '-') + 1;
-			p[3] = strchr(p[2], '.') + 1;
-			strncpy(pAddin->cName, p[0], (size_t)((p[1] - p[0]) - 1));
-			strncpy(pAddin->cSubsystem, p[2], (size_t)((p[3] - p[2]) - 1));
+			p[0] = cFileName;
+			p[1] = strchr(p[0], '-');
+			if (!p[1])
+				goto skip;
+			p[1] += 1;
+			p[2] = strchr(p[1], '-');
+			if (!p[2])
+				goto skip;
+			p[2] += 1;
+			p[3] = strchr(p[2], '.');
+			if (!p[3])
+				goto skip;
+			p[3] += 1;
+
+			len = (size_t)(p[1] - p[0]);
+			if (len < 1)
+			{
+				WLog_WARN(TAG, "Skipping file '%s', invalid format", cFileName);
+				goto skip;
+			}
+			strncpy(pAddin->cName, p[0], MIN(ARRAYSIZE(pAddin->cName), len - 1));
+
+			len = (size_t)(p[3] - p[2]);
+			if (len < 1)
+			{
+				WLog_WARN(TAG, "Skipping file '%s', invalid format", cFileName);
+				goto skip;
+			}
+			strncpy(pAddin->cSubsystem, p[2], MIN(ARRAYSIZE(pAddin->cSubsystem), len - 1));
+
 			pAddin->dwFlags = FREERDP_ADDIN_CLIENT;
 			pAddin->dwFlags |= FREERDP_ADDIN_DYNAMIC;
 			pAddin->dwFlags |= FREERDP_ADDIN_NAME;
 			pAddin->dwFlags |= FREERDP_ADDIN_SUBSYSTEM;
 			ppAddins[nAddins++] = pAddin;
+
+			used = TRUE;
 		}
 		else if (nDashes == 3)
 		{
+			size_t len;
+			char* p[5] = { 0 };
 			/* <name>-client-<subsystem>-<type>.<extension> */
-			p[0] = FindData.cFileName;
-			p[1] = strchr(p[0], '-') + 1;
-			p[2] = strchr(p[1], '-') + 1;
-			p[3] = strchr(p[2], '-') + 1;
-			p[4] = strchr(p[3], '.') + 1;
-			strncpy(pAddin->cName, p[0], (size_t)((p[1] - p[0]) - 1));
-			strncpy(pAddin->cSubsystem, p[2], (size_t)((p[3] - p[2]) - 1));
-			strncpy(pAddin->cType, p[3], (size_t)((p[4] - p[3]) - 1));
+			p[0] = cFileName;
+			p[1] = strchr(p[0], '-');
+			if (!p[1])
+				goto skip;
+			p[1] += 1;
+			p[2] = strchr(p[1], '-');
+			if (!p[2])
+				goto skip;
+			p[2] += 1;
+			p[3] = strchr(p[2], '-');
+			if (!p[3])
+				goto skip;
+			p[3] += 1;
+			p[4] = strchr(p[3], '.');
+			if (!p[4])
+				goto skip;
+			p[4] += 1;
+
+			len = (size_t)(p[1] - p[0]);
+			if (len < 1)
+			{
+				WLog_WARN(TAG, "Skipping file '%s', invalid format", cFileName);
+				goto skip;
+			}
+			strncpy(pAddin->cName, p[0], MIN(ARRAYSIZE(pAddin->cName), len - 1));
+
+			len = (size_t)(p[3] - p[2]);
+			if (len < 1)
+			{
+				WLog_WARN(TAG, "Skipping file '%s', invalid format", cFileName);
+				goto skip;
+			}
+			strncpy(pAddin->cSubsystem, p[2], MIN(ARRAYSIZE(pAddin->cSubsystem), len - 1));
+
+			len = (size_t)(p[4] - p[3]);
+			if (len < 1)
+			{
+				WLog_WARN(TAG, "Skipping file '%s', invalid format", cFileName);
+				goto skip;
+			}
+			strncpy(pAddin->cType, p[3], MIN(ARRAYSIZE(pAddin->cType), len - 1));
+
 			pAddin->dwFlags = FREERDP_ADDIN_CLIENT;
 			pAddin->dwFlags |= FREERDP_ADDIN_DYNAMIC;
 			pAddin->dwFlags |= FREERDP_ADDIN_NAME;
 			pAddin->dwFlags |= FREERDP_ADDIN_SUBSYSTEM;
 			pAddin->dwFlags |= FREERDP_ADDIN_TYPE;
 			ppAddins[nAddins++] = pAddin;
+
+			used = TRUE;
 		}
-		else
-		{
+
+	skip:
+		free(cFileName);
+		if (!used)
 			free(pAddin);
-		}
-	} while (FindNextFileA(hFind, &FindData));
+
+	} while (FindNextFileW(hFind, &FindData));
 
 	FindClose(hFind);
 	ppAddins[nAddins] = NULL;
@@ -428,10 +533,9 @@ static DWORD WINAPI channel_client_thread_proc(LPVOID userdata)
 	wStream* data;
 	wMessage message;
 	msg_proc_internals* internals = userdata;
-	if (!internals)
-	{
-		/* TODO: return some error */
-	}
+
+	WINPR_ASSERT(internals);
+
 	while (1)
 	{
 		if (!MessageQueue_Wait(internals->queue))
@@ -478,7 +582,7 @@ static void free_msg(void* obj)
 {
 	wMessage* msg = (wMessage*)obj;
 
-	if (msg)
+	if (msg && (msg->id == 0))
 	{
 		wStream* s = (wStream*)msg->wParam;
 		Stream_Free(s, TRUE);
@@ -498,6 +602,8 @@ void* channel_client_create_handler(rdpContext* ctx, LPVOID userdata, MsgHandler
 	internals->msg_handler = msg_handler;
 	internals->userdata = userdata;
 	internals->channel_name = _strdup(channel_name);
+	WINPR_ASSERT(ctx);
+	WINPR_ASSERT(ctx->settings);
 	internals->ctx = ctx;
 	if (!(ctx->settings->ThreadingFlags & THREADING_FLAGS_DISABLE_THREADS))
 	{

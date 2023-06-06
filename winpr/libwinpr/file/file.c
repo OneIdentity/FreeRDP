@@ -19,9 +19,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif /* HAVE_CONFIG_H */
+#include <winpr/config.h>
 
 #if defined(__FreeBSD_kernel__) && defined(__GLIBC__)
 #define _GNU_SOURCE
@@ -63,15 +61,7 @@
 
 static BOOL FileIsHandled(HANDLE handle)
 {
-	WINPR_FILE* pFile = (WINPR_FILE*)handle;
-
-	if (!pFile || (pFile->Type != HANDLE_TYPE_FILE))
-	{
-		SetLastError(ERROR_INVALID_HANDLE);
-		return FALSE;
-	}
-
-	return TRUE;
+	return WINPR_HANDLE_IS_HANDLED(handle, HANDLE_TYPE_FILE, FALSE);
 }
 
 static int FileGetFd(HANDLE handle)
@@ -217,7 +207,7 @@ static BOOL FileRead(PVOID Object, LPVOID lpBuffer, DWORD nNumberOfBytesToRead,
 
 	if (lpOverlapped)
 	{
-		WLog_ERR(TAG, "WinPR %s does not support the lpOverlapped parameter", __FUNCTION__);
+		WLog_ERR(TAG, "WinPR does not support the lpOverlapped parameter");
 		SetLastError(ERROR_NOT_SUPPORTED);
 		return FALSE;
 	}
@@ -257,7 +247,7 @@ static BOOL FileWrite(PVOID Object, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrit
 
 	if (lpOverlapped)
 	{
-		WLog_ERR(TAG, "WinPR %s does not support the lpOverlapped parameter", __FUNCTION__);
+		WLog_ERR(TAG, "WinPR does not support the lpOverlapped parameter");
 		SetLastError(ERROR_NOT_SUPPORTED);
 		return FALSE;
 	}
@@ -327,6 +317,69 @@ static DWORD FileGetFileSize(HANDLE Object, LPDWORD lpFileSizeHigh)
 	return (UINT32)(size & 0xFFFFFFFF);
 }
 
+static BOOL FileGetFileInformationByHandle(HANDLE hFile,
+                                           LPBY_HANDLE_FILE_INFORMATION lpFileInformation)
+{
+	WINPR_FILE* pFile = (WINPR_FILE*)hFile;
+	struct stat st;
+	UINT64 ft;
+	const char* lastSep;
+
+	if (!pFile)
+		return FALSE;
+	if (!lpFileInformation)
+		return FALSE;
+
+	if (fstat(fileno(pFile->fp), &st) == -1)
+	{
+		WLog_ERR(TAG, "fstat failed with %s [%#08X]", errno, strerror(errno));
+		return FALSE;
+	}
+
+	lpFileInformation->dwFileAttributes = 0;
+
+	if (S_ISDIR(st.st_mode))
+		lpFileInformation->dwFileAttributes |= FILE_ATTRIBUTE_DIRECTORY;
+
+	if (lpFileInformation->dwFileAttributes == 0)
+		lpFileInformation->dwFileAttributes = FILE_ATTRIBUTE_ARCHIVE;
+
+	lastSep = strrchr(pFile->lpFileName, '/');
+
+	if (lastSep)
+	{
+		const char* name = lastSep + 1;
+		const size_t namelen = strlen(name);
+
+		if ((namelen > 1) && (name[0] == '.') && (name[1] != '.'))
+			lpFileInformation->dwFileAttributes |= FILE_ATTRIBUTE_HIDDEN;
+	}
+
+	if (!(st.st_mode & S_IWUSR))
+		lpFileInformation->dwFileAttributes |= FILE_ATTRIBUTE_READONLY;
+
+#ifdef _DARWIN_FEATURE_64_BIT_INODE
+	ft = STAT_TIME_TO_FILETIME(st.st_birthtime);
+#else
+	ft = STAT_TIME_TO_FILETIME(st.st_ctime);
+#endif
+	lpFileInformation->ftCreationTime.dwHighDateTime = ((UINT64)ft) >> 32ULL;
+	lpFileInformation->ftCreationTime.dwLowDateTime = ft & 0xFFFFFFFF;
+	ft = STAT_TIME_TO_FILETIME(st.st_mtime);
+	lpFileInformation->ftLastWriteTime.dwHighDateTime = ((UINT64)ft) >> 32ULL;
+	lpFileInformation->ftLastWriteTime.dwLowDateTime = ft & 0xFFFFFFFF;
+	ft = STAT_TIME_TO_FILETIME(st.st_atime);
+	lpFileInformation->ftLastAccessTime.dwHighDateTime = ((UINT64)ft) >> 32ULL;
+	lpFileInformation->ftLastAccessTime.dwLowDateTime = ft & 0xFFFFFFFF;
+	lpFileInformation->nFileSizeHigh = ((UINT64)st.st_size) >> 32ULL;
+	lpFileInformation->nFileSizeLow = st.st_size & 0xFFFFFFFF;
+	lpFileInformation->dwVolumeSerialNumber = st.st_dev;
+	lpFileInformation->nNumberOfLinks = st.st_nlink;
+	lpFileInformation->nFileIndexHigh = (st.st_ino >> 4) & 0xFFFFFFFF;
+	lpFileInformation->nFileIndexLow = st.st_ino & 0xFFFFFFFF;
+	return TRUE;
+}
+
 static BOOL FileLockFileEx(HANDLE hFile, DWORD dwFlags, DWORD dwReserved,
                            DWORD nNumberOfBytesToLockLow, DWORD nNumberOfBytesToLockHigh,
                            LPOVERLAPPED lpOverlapped)
@@ -341,7 +394,7 @@ static BOOL FileLockFileEx(HANDLE hFile, DWORD dwFlags, DWORD dwReserved,
 
 	if (lpOverlapped)
 	{
-		WLog_ERR(TAG, "WinPR %s does not support the lpOverlapped parameter", __FUNCTION__);
+		WLog_ERR(TAG, "WinPR does not support the lpOverlapped parameter");
 		SetLastError(ERROR_NOT_SUPPORTED);
 		return FALSE;
 	}
@@ -447,7 +500,7 @@ static BOOL FileUnlockFileEx(HANDLE hFile, DWORD dwReserved, DWORD nNumberOfByte
 
 	if (lpOverlapped)
 	{
-		WLog_ERR(TAG, "WinPR %s does not support the lpOverlapped parameter", __FUNCTION__);
+		WLog_ERR(TAG, "WinPR does not support the lpOverlapped parameter");
 		SetLastError(ERROR_NOT_SUPPORTED);
 		return FALSE;
 	}
@@ -486,10 +539,10 @@ static BOOL FileUnlockFileEx(HANDLE hFile, DWORD dwReserved, DWORD nNumberOfByte
 
 static UINT64 FileTimeToUS(const FILETIME* ft)
 {
-	const UINT64 EPOCH_DIFF = 11644473600ULL * 1000000ULL;
+	const UINT64 EPOCH_DIFF_US = EPOCH_DIFF * 1000000ULL;
 	UINT64 tmp = ((UINT64)ft->dwHighDateTime) << 32 | ft->dwLowDateTime;
 	tmp /= 10; /* 100ns steps to 1us step */
-	tmp -= EPOCH_DIFF;
+	tmp -= EPOCH_DIFF_US;
 	return tmp;
 }
 
@@ -588,44 +641,52 @@ static BOOL FileSetFileTime(HANDLE hFile, const FILETIME* lpCreationTime,
 	return TRUE;
 }
 
-static HANDLE_OPS fileOps = { FileIsHandled,
-	                          FileCloseHandle,
-	                          FileGetFd,
-	                          NULL, /* CleanupHandle */
-	                          FileRead,
-	                          NULL, /* FileReadEx */
-	                          NULL, /* FileReadScatter */
-	                          FileWrite,
-	                          NULL, /* FileWriteEx */
-	                          NULL, /* FileWriteGather */
-	                          FileGetFileSize,
-	                          NULL, /*  FlushFileBuffers */
-	                          FileSetEndOfFile,
-	                          FileSetFilePointer,
-	                          FileSetFilePointerEx,
-	                          NULL, /* FileLockFile */
-	                          FileLockFileEx,
-	                          FileUnlockFile,
-	                          FileUnlockFileEx,
-	                          FileSetFileTime };
+static HANDLE_OPS fileOps = {
+	FileIsHandled,
+	FileCloseHandle,
+	FileGetFd,
+	NULL, /* CleanupHandle */
+	FileRead,
+	NULL, /* FileReadEx */
+	NULL, /* FileReadScatter */
+	FileWrite,
+	NULL, /* FileWriteEx */
+	NULL, /* FileWriteGather */
+	FileGetFileSize,
+	NULL, /*  FlushFileBuffers */
+	FileSetEndOfFile,
+	FileSetFilePointer,
+	FileSetFilePointerEx,
+	NULL, /* FileLockFile */
+	FileLockFileEx,
+	FileUnlockFile,
+	FileUnlockFileEx,
+	FileSetFileTime,
+	FileGetFileInformationByHandle,
+};
 
 static HANDLE_OPS shmOps = {
-	FileIsHandled, FileCloseHandle,
-	FileGetFd,     NULL, /* CleanupHandle */
-	FileRead,      NULL, /* FileReadEx */
-	NULL,                /* FileReadScatter */
-	FileWrite,     NULL, /* FileWriteEx */
-	NULL,                /* FileWriteGather */
-	NULL,                /* FileGetFileSize */
-	NULL,                /*  FlushFileBuffers */
-	NULL,                /* FileSetEndOfFile */
-	NULL,                /* FileSetFilePointer */
-	NULL,                /* SetFilePointerEx */
-	NULL,                /* FileLockFile */
-	NULL,                /* FileLockFileEx */
-	NULL,                /* FileUnlockFile */
-	NULL,                /* FileUnlockFileEx */
-	NULL                 /* FileSetFileTime */
+	FileIsHandled,
+	FileCloseHandle,
+	FileGetFd,
+	NULL, /* CleanupHandle */
+	FileRead,
+	NULL, /* FileReadEx */
+	NULL, /* FileReadScatter */
+	FileWrite,
+	NULL, /* FileWriteEx */
+	NULL, /* FileWriteGather */
+	NULL, /* FileGetFileSize */
+	NULL, /*  FlushFileBuffers */
+	NULL, /* FileSetEndOfFile */
+	NULL, /* FileSetFilePointer */
+	NULL, /* SetFilePointerEx */
+	NULL, /* FileLockFile */
+	NULL, /* FileLockFileEx */
+	NULL, /* FileUnlockFile */
+	NULL, /* FileUnlockFileEx */
+	NULL, /* FileSetFileTime */
+	FileGetFileInformationByHandle,
 };
 
 static const char* FileGetMode(DWORD dwDesiredAccess, DWORD dwCreationDisposition, BOOL* create)
@@ -700,6 +761,10 @@ UINT32 map_posix_err(int fs_errno)
 			rc = STATUS_DIRECTORY_NOT_EMPTY;
 			break;
 
+		case EMFILE:
+			rc = STATUS_TOO_MANY_OPENED_FILES;
+			break;
+
 		default:
 			WLog_ERR(TAG, "Missing ERRNO mapping %s [%d]", strerror(fs_errno), fs_errno);
 			rc = STATUS_UNSUCCESSFUL;
@@ -727,7 +792,7 @@ static HANDLE FileCreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dw
 
 	if (dwFlagsAndAttributes & FILE_FLAG_OVERLAPPED)
 	{
-		WLog_ERR(TAG, "WinPR %s does not support the FILE_FLAG_OVERLAPPED flag", __FUNCTION__);
+		WLog_ERR(TAG, "WinPR does not support the FILE_FLAG_OVERLAPPED flag");
 		SetLastError(ERROR_NOT_SUPPORTED);
 		return INVALID_HANDLE_VALUE;
 	}
@@ -740,7 +805,7 @@ static HANDLE FileCreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dw
 	}
 
 	WINPR_HANDLE_SET_TYPE_AND_MODE(pFile, HANDLE_TYPE_FILE, WINPR_FD_READ);
-	pFile->ops = &fileOps;
+	pFile->common.ops = &fileOps;
 
 	pFile->lpFileName = _strdup(lpFileName);
 	if (!pFile->lpFileName)
@@ -882,7 +947,7 @@ HANDLE_CREATOR* GetFileHandleCreator(void)
 static WINPR_FILE* FileHandle_New(FILE* fp)
 {
 	WINPR_FILE* pFile;
-	char name[MAX_PATH];
+	char name[MAX_PATH] = { 0 };
 
 	_snprintf(name, sizeof(name), "device_%d", fileno(fp));
 	pFile = (WINPR_FILE*)calloc(1, sizeof(WINPR_FILE));
@@ -892,7 +957,7 @@ static WINPR_FILE* FileHandle_New(FILE* fp)
 		return NULL;
 	}
 	pFile->fp = fp;
-	pFile->ops = &shmOps;
+	pFile->common.ops = &shmOps;
 	pFile->lpFileName = _strdup(name);
 
 	WINPR_HANDLE_SET_TYPE_AND_MODE(pFile, HANDLE_TYPE_FILE, WINPR_FD_READ);
@@ -959,8 +1024,11 @@ BOOL GetDiskFreeSpaceW(LPCWSTR lpwRootPathName, LPDWORD lpSectorsPerCluster,
 {
 	LPSTR lpRootPathName;
 	BOOL ret;
+	if (!lpwRootPathName)
+		return FALSE;
 
-	if (ConvertFromUnicode(CP_UTF8, 0, lpwRootPathName, -1, &lpRootPathName, 0, NULL, NULL) <= 0)
+	lpRootPathName = ConvertWCharToUtf8Alloc(lpwRootPathName, NULL);
+	if (!lpRootPathName)
 	{
 		SetLastError(ERROR_NOT_ENOUGH_MEMORY);
 		return FALSE;
@@ -970,6 +1038,8 @@ BOOL GetDiskFreeSpaceW(LPCWSTR lpwRootPathName, LPDWORD lpSectorsPerCluster,
 	free(lpRootPathName);
 	return ret;
 }
+
+#endif /* _WIN32 */
 
 /**
  * Check if a file name component is valid.
@@ -1053,8 +1123,6 @@ BOOL ValidFileNameComponent(LPCWSTR lpFileName)
 	return TRUE;
 }
 
-#endif /* _WIN32 */
-
 #ifdef _UWP
 
 HANDLE CreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode,
@@ -1062,9 +1130,7 @@ HANDLE CreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode,
                    DWORD dwFlagsAndAttributes, HANDLE hTemplateFile)
 {
 	HANDLE hFile;
-	CREATEFILE2_EXTENDED_PARAMETERS params;
-
-	ZeroMemory(&params, sizeof(CREATEFILE2_EXTENDED_PARAMETERS));
+	CREATEFILE2_EXTENDED_PARAMETERS params = { 0 };
 
 	params.dwSize = sizeof(CREATEFILE2_EXTENDED_PARAMETERS);
 
@@ -1154,9 +1220,10 @@ HANDLE CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode,
                    DWORD dwFlagsAndAttributes, HANDLE hTemplateFile)
 {
 	HANDLE hFile;
-	WCHAR* lpFileNameW = NULL;
+	if (!lpFileName)
+		return NULL;
 
-	ConvertToUnicode(CP_UTF8, 0, lpFileName, -1, &lpFileNameW, 0);
+	WCHAR* lpFileNameW = ConvertUtf8ToWCharAlloc(lpFileName, NULL);
 
 	if (!lpFileNameW)
 		return NULL;
@@ -1225,13 +1292,12 @@ DWORD GetFullPathNameA(LPCSTR lpFileName, DWORD nBufferLength, LPSTR lpBuffer, L
 	WCHAR* lpFileNameW = NULL;
 	WCHAR* lpBufferW = NULL;
 	WCHAR* lpFilePartW = NULL;
-	DWORD nBufferLengthW = nBufferLength * 2;
+	DWORD nBufferLengthW = nBufferLength * sizeof(WCHAR);
 
 	if (!lpFileName || (nBufferLength < 1))
 		return 0;
 
-	ConvertToUnicode(CP_UTF8, 0, lpFileName, -1, &lpFileNameW, 0);
-
+	lpFileNameW = ConvertUtf8ToWCharAlloc(lpFileName, NULL);
 	if (!lpFileNameW)
 		return 0;
 
@@ -1242,7 +1308,7 @@ DWORD GetFullPathNameA(LPCSTR lpFileName, DWORD nBufferLength, LPSTR lpBuffer, L
 
 	dwStatus = GetFullPathNameW(lpFileNameW, nBufferLengthW, lpBufferW, &lpFilePartW);
 
-	ConvertFromUnicode(CP_UTF8, 0, lpBufferW, nBufferLengthW, &lpBuffer, nBufferLength, NULL, NULL);
+	ConvertWCharNToUtf8(lpBufferW, nBufferLengthW / sizeof(WCHAR), lpBuffer, nBufferLength);
 
 	if (lpFilePart)
 		lpFilePart = lpBuffer + (lpFilePartW - lpBufferW);
@@ -1375,10 +1441,12 @@ FILE* winpr_fopen(const char* path, const char* mode)
 	if (!path || !mode)
 		return NULL;
 
-	if (ConvertToUnicode(CP_UTF8, 0, path, -1, &lpPathW, 0) < 1)
+	lpPathW = ConvertUtf8ToWCharAlloc(path, NULL);
+	if (!lpPathW)
 		goto cleanup;
 
-	if (ConvertToUnicode(CP_UTF8, 0, mode, -1, &lpModeW, 0) < 1)
+	lpModeW = ConvertUtf8ToWCharAlloc(mode, NULL);
+	if (!lpModeW)
 		goto cleanup;
 
 	result = _wfopen(lpPathW, lpModeW);

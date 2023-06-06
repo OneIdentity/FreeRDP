@@ -19,9 +19,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <winpr/config.h>
 
 #include <winpr/wtypes.h>
 #include <winpr/crt.h>
@@ -51,7 +49,7 @@ static BOOL writeBitmapFileHeader(wStream* s, const WINPR_BITMAP_FILE_HEADER* bf
 
 static BOOL readBitmapFileHeader(wStream* s, WINPR_BITMAP_FILE_HEADER* bf)
 {
-	if (!s || !bf || (Stream_GetRemainingLength(s) < sizeof(WINPR_BITMAP_FILE_HEADER)))
+	if (!s || !bf || (!Stream_CheckAndLogRequiredLength(TAG, s, sizeof(WINPR_BITMAP_FILE_HEADER))))
 		return FALSE;
 
 	Stream_Read_UINT8(s, bf->bfType[0]);
@@ -84,7 +82,7 @@ static BOOL writeBitmapInfoHeader(wStream* s, const WINPR_BITMAP_INFO_HEADER* bi
 
 static BOOL readBitmapInfoHeader(wStream* s, WINPR_BITMAP_INFO_HEADER* bi)
 {
-	if (!s || !bi || (Stream_GetRemainingLength(s) < sizeof(WINPR_BITMAP_INFO_HEADER)))
+	if (!s || !bi || (!Stream_CheckAndLogRequiredLength(TAG, s, sizeof(WINPR_BITMAP_INFO_HEADER))))
 		return FALSE;
 
 	Stream_Read_UINT32(s, bi->biSize);
@@ -104,8 +102,8 @@ static BOOL readBitmapInfoHeader(wStream* s, WINPR_BITMAP_INFO_HEADER* bi)
 BYTE* winpr_bitmap_construct_header(size_t width, size_t height, size_t bpp)
 {
 	BYTE* result = NULL;
-	WINPR_BITMAP_FILE_HEADER bf;
-	WINPR_BITMAP_INFO_HEADER bi;
+	WINPR_BITMAP_FILE_HEADER bf = { 0 };
+	WINPR_BITMAP_INFO_HEADER bi = { 0 };
 	wStream* s;
 	size_t imgSize;
 
@@ -154,9 +152,18 @@ fail:
 int winpr_bitmap_write(const char* filename, const BYTE* data, size_t width, size_t height,
                        size_t bpp)
 {
-	FILE* fp;
+	return winpr_bitmap_write_ex(filename, data, 0, width, height, bpp);
+}
+
+int winpr_bitmap_write_ex(const char* filename, const BYTE* data, size_t stride, size_t width,
+                          size_t height, size_t bpp)
+{
+	FILE* fp = NULL;
 	BYTE* bmp_header = NULL;
-	size_t img_size = width * height * (bpp / 8);
+	const size_t bpp_stride = width * (bpp / 8);
+
+	if (stride == 0)
+		stride = bpp_stride;
 
 	int ret = -1;
 	fp = winpr_fopen(filename, "w+b");
@@ -171,13 +178,20 @@ int winpr_bitmap_write(const char* filename, const BYTE* data, size_t width, siz
 	if (!bmp_header)
 		goto fail;
 
-	if (fwrite(bmp_header, WINPR_IMAGE_BMP_HEADER_LEN, 1, fp) != 1 ||
-	    fwrite((const void*)data, img_size, 1, fp) != 1)
+	if (fwrite(bmp_header, WINPR_IMAGE_BMP_HEADER_LEN, 1, fp) != 1)
 		goto fail;
+
+	for (size_t y = 0; y < height; y++)
+	{
+		const void* line = &data[stride * y];
+		if (fwrite(line, bpp_stride, 1, fp) != 1)
+			goto fail;
+	}
 
 	ret = 1;
 fail:
-	fclose(fp);
+	if (fp)
+		fclose(fp);
 	free(bmp_header);
 	return ret;
 }
@@ -263,15 +277,17 @@ static int winpr_image_bitmap_read_fp(wImage* image, FILE* fp)
 	BOOL vFlip;
 	BYTE* pDstData;
 	wStream* s;
-	WINPR_BITMAP_FILE_HEADER bf;
-	WINPR_BITMAP_INFO_HEADER bi;
+	wStream sbuffer = { 0 };
+	BYTE buffer[sizeof(WINPR_BITMAP_FILE_HEADER) + sizeof(WINPR_BITMAP_INFO_HEADER)] = { 0 };
+	WINPR_BITMAP_FILE_HEADER bf = { 0 };
+	WINPR_BITMAP_INFO_HEADER bi = { 0 };
 
 	if (!image || !fp)
 		return -1;
 
 	image->data = NULL;
 
-	s = Stream_New(NULL, sizeof(WINPR_BITMAP_FILE_HEADER) + sizeof(WINPR_BITMAP_INFO_HEADER));
+	s = Stream_StaticInit(&sbuffer, buffer, sizeof(buffer));
 
 	if (!s)
 		return -1;
@@ -341,7 +357,6 @@ fail:
 		image->data = NULL;
 	}
 
-	Stream_Free(s, TRUE);
 	return 1;
 }
 
@@ -353,7 +368,8 @@ static int winpr_image_bitmap_read_buffer(wImage* image, const BYTE* buffer, siz
 	BYTE* pDstData;
 	WINPR_BITMAP_FILE_HEADER bf;
 	WINPR_BITMAP_INFO_HEADER bi;
-	wStream* s = Stream_New((BYTE*)buffer, size);
+	wStream sbuffer = { 0 };
+	wStream* s = Stream_StaticConstInit(&sbuffer, buffer, size);
 
 	if (!s)
 		return -1;
@@ -370,7 +386,7 @@ static int winpr_image_bitmap_read_buffer(wImage* image, const BYTE* buffer, siz
 		goto fail;
 	if (!Stream_SafeSeek(s, bf.bfOffBits - Stream_GetPosition(s)))
 		goto fail;
-	if (Stream_GetRemainingCapacity(s) < bi.biSizeImage)
+	if (!Stream_CheckAndLogRequiredCapacity(TAG, s, bi.biSizeImage))
 		goto fail;
 
 	if (bi.biWidth < 0)
@@ -419,7 +435,6 @@ fail:
 		image->data = NULL;
 	}
 
-	Stream_Free(s, FALSE);
 	return rc;
 }
 

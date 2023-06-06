@@ -35,6 +35,8 @@ set(${MODULE_PREFIX}_SRCS
 	wf_client.h
 	wf_floatbar.c
 	wf_floatbar.h
+	wf_defaults.h
+	wf_defaults.c
 	resource/wfreerdp.rc
 	resource/resource.h)
 
@@ -93,10 +95,10 @@ else()
 	set_target_properties(${MODULE_NAME} PROPERTIES OUTPUT_NAME "wfreerdp")
 endif()
 
-set(${MODULE_PREFIX}_LIBS ${${MODULE_PREFIX}_LIBS} freerdp-client)
-set(${MODULE_PREFIX}_LIBS ${${MODULE_PREFIX}_LIBS} winpr freerdp)
-set(${MODULE_PREFIX}_LIBS ${${MODULE_PREFIX}_LIBS} msimg32)
-target_link_libraries(${MODULE_NAME} ${${MODULE_PREFIX}_LIBS})
+list(APPEND LIBS freerdp-client)
+list(APPEND LIBS winpr freerdp)
+list(APPEND LIBS msimg32 credui ntdll)
+target_link_libraries(${MODULE_NAME} PRIVATE ${LIBS})
 
 if(WITH_CLIENT_INTERFACE)
 	install(TARGETS ${MODULE_NAME} DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT libraries)

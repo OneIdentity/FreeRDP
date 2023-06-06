@@ -19,9 +19,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -46,12 +44,13 @@
 #endif
 #include <sys/ioctl.h>
 
+#include <freerdp/freerdp.h>
 #include <freerdp/addin.h>
 #include <freerdp/channels/rdpsnd.h>
 
 #include "audin_main.h"
 
-typedef struct _AudinOSSDevice
+typedef struct
 {
 	IAudinDevice iface;
 
@@ -115,10 +114,6 @@ static BOOL audin_oss_format_supported(IAudinDevice* device, const AUDIO_FORMAT*
 				return FALSE;
 
 			break;
-
-		case WAVE_FORMAT_ALAW:
-		case WAVE_FORMAT_MULAW:
-			return TRUE;
 
 		default:
 			return FALSE;
@@ -371,7 +366,7 @@ static UINT audin_oss_free(IAudinDevice* device)
 
 	if ((error = audin_oss_close(device)))
 	{
-		WLog_ERR(TAG, "audin_oss_close failed with error code %d!", error);
+		WLog_ERR(TAG, "audin_oss_close failed with error code %" PRIu32 "!", error);
 	}
 
 	free(oss);
@@ -443,18 +438,12 @@ static UINT audin_oss_parse_addin_args(AudinOSSDevice* device, const ADDIN_ARGV*
 	return CHANNEL_RC_OK;
 }
 
-#ifdef BUILTIN_CHANNELS
-#define freerdp_audin_client_subsystem_entry oss_freerdp_audin_client_subsystem_entry
-#else
-#define freerdp_audin_client_subsystem_entry FREERDP_API freerdp_audin_client_subsystem_entry
-#endif
-
 /**
  * Function description
  *
  * @return 0 on success, otherwise a Win32 error code
  */
-UINT freerdp_audin_client_subsystem_entry(PFREERDP_AUDIN_DEVICE_ENTRY_POINTS pEntryPoints)
+UINT oss_freerdp_audin_client_subsystem_entry(PFREERDP_AUDIN_DEVICE_ENTRY_POINTS pEntryPoints)
 {
 	const ADDIN_ARGV* args;
 	AudinOSSDevice* oss;

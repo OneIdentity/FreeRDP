@@ -17,9 +17,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <winpr/config.h>
 
 #include <winpr/crt.h>
 #include <winpr/wlog.h>
@@ -28,7 +26,7 @@
 
 #include "../stream.h"
 
-struct _wStreamPool
+struct s_wStreamPool
 {
 	size_t aSize;
 	size_t aCapacity;
@@ -246,6 +244,30 @@ out_fail:
  * Returns an object to the pool.
  */
 
+static void StreamPool_Remove(wStreamPool* pool, wStream* s)
+{
+	StreamPool_EnsureCapacity(pool, 1, FALSE);
+	Stream_EnsureValidity(s);
+	for (size_t x = 0; x < pool->aSize; x++)
+	{
+		wStream* cs = pool->aArray[x];
+
+		WINPR_ASSERT(cs != s);
+	}
+	pool->aArray[(pool->aSize)++] = s;
+	StreamPool_RemoveUsed(pool, s);
+}
+
+static void StreamPool_ReleaseOrReturn(wStreamPool* pool, wStream* s)
+{
+	StreamPool_Lock(pool);
+	if (s->count > 0)
+		s->count--;
+	if (s->count == 0)
+		StreamPool_Remove(pool, s);
+	StreamPool_Unlock(pool);
+}
+
 void StreamPool_Return(wStreamPool* pool, wStream* s)
 {
 	WINPR_ASSERT(pool);
@@ -253,14 +275,7 @@ void StreamPool_Return(wStreamPool* pool, wStream* s)
 		return;
 
 	StreamPool_Lock(pool);
-
-	StreamPool_EnsureCapacity(pool, 1, FALSE);
-	{
-		Stream_EnsureValidity(s);
-		pool->aArray[(pool->aSize)++] = s;
-		StreamPool_RemoveUsed(pool, s);
-	}
-
+	StreamPool_Remove(pool, s);
 	StreamPool_Unlock(pool);
 }
 
@@ -285,18 +300,9 @@ void Stream_AddRef(wStream* s)
 
 void Stream_Release(wStream* s)
 {
-	DWORD count;
-
 	WINPR_ASSERT(s);
 	if (s->pool)
-	{
-		StreamPool_Lock(s->pool);
-		count = --(s->count);
-		StreamPool_Unlock(s->pool);
-
-		if (count == 0)
-			StreamPool_Return(s->pool, s);
-	}
+		StreamPool_ReleaseOrReturn(s->pool, s);
 }
 
 /**
@@ -337,14 +343,14 @@ void StreamPool_Clear(wStreamPool* pool)
 
 	while (pool->aSize > 0)
 	{
-		(pool->aSize)--;
-		Stream_Free(pool->aArray[pool->aSize], TRUE);
+		wStream* s = pool->aArray[--pool->aSize];
+		Stream_Free(s, s->isAllocatedStream);
 	}
 
 	while (pool->uSize > 0)
 	{
-		(pool->uSize)--;
-		Stream_Free(pool->uArray[pool->uSize], TRUE);
+		wStream* s = pool->uArray[--pool->uSize];
+		Stream_Free(s, s->isAllocatedStream);
 	}
 
 	StreamPool_Unlock(pool);

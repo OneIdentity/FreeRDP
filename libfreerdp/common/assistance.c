@@ -17,9 +17,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <errno.h>
 
@@ -182,30 +180,32 @@ static BOOL append_address(rdpAssistanceFile* file, const char* host, const char
 
 static BOOL freerdp_assistance_parse_address_list(rdpAssistanceFile* file, char* list)
 {
+	WLog_DBG(TAG, "freerdp_assistance_parse_address_list list=%s", list);
+
 	BOOL rc = FALSE;
-	char* p;
 
 	if (!file || !list)
 		return FALSE;
 
-	p = list;
+	char* strp = list;
+	char* s = ";";
+	char* token;
 
-	while ((p = strchr(p, ';')) != NULL)
+	// get the first token
+	token = strtok(strp, s);
+
+	// walk through other tokens
+	while (token != NULL)
 	{
-		char* q = strchr(p, ':');
+		char* port = strchr(token, ':');
+		*port = '\0';
+		port++;
 
-		if (!q)
+		if (!append_address(file, token, port))
 			goto out;
 
-		*q = '\0';
-		q++;
-
-		if (!append_address(file, p, q))
-			goto out;
-
-		p = q;
+		token = strtok(NULL, s);
 	}
-
 	rc = TRUE;
 out:
 	return rc;
@@ -459,7 +459,7 @@ static BOOL freerdp_assistance_parse_connection_string2(rdpAssistanceFile* file)
 		q++;
 		length = strlen(p);
 
-		if (length > 8)
+		if (length > 6)
 		{
 			if (!append_address(file, p, port))
 				goto out_fail;
@@ -545,7 +545,6 @@ BYTE* freerdp_assistance_encrypt_pass_stub(const char* password, const char* pas
                                            size_t* pEncryptedSize)
 {
 	BOOL rc;
-	int status;
 	size_t cbPasswordW;
 	size_t cbPassStubW;
 	size_t EncryptedSize;
@@ -554,25 +553,18 @@ BYTE* freerdp_assistance_encrypt_pass_stub(const char* password, const char* pas
 	BYTE* pbIn = NULL;
 	BYTE* pbOut = NULL;
 	size_t cbOut, cbIn, cbFinal;
-	WCHAR* PasswordW = NULL;
-	WCHAR* PassStubW = NULL;
-	status = ConvertToUnicode(CP_UTF8, 0, password, -1, &PasswordW, 0);
+	WCHAR* PasswordW = ConvertUtf8ToWCharAlloc(password, &cbPasswordW);
+	WCHAR* PassStubW = ConvertUtf8ToWCharAlloc(passStub, &cbPassStubW);
 
-	if (status <= 0)
-		return NULL;
+	if (!PasswordW || !PassStubW)
+		goto fail;
 
-	cbPasswordW = (size_t)(status - 1) * 2UL;
-
+	cbPasswordW = (cbPasswordW) * sizeof(WCHAR);
+	cbPassStubW = (cbPassStubW) * sizeof(WCHAR);
 	if (!winpr_Digest(WINPR_MD_MD5, (BYTE*)PasswordW, cbPasswordW, (BYTE*)PasswordHash,
 	                  sizeof(PasswordHash)))
 		goto fail;
 
-	status = ConvertToUnicode(CP_UTF8, 0, passStub, -1, &PassStubW, 0);
-
-	if (status <= 0)
-		goto fail;
-
-	cbPassStubW = (size_t)(status - 1) * 2UL;
 	EncryptedSize = cbPassStubW + 4;
 	pbIn = (BYTE*)calloc(1, EncryptedSize);
 	pbOut = (BYTE*)calloc(1, EncryptedSize);
@@ -626,29 +618,27 @@ static BOOL freerdp_assistance_decrypt2(rdpAssistanceFile* file, const char* pas
 	BOOL rc = FALSE;
 	int status = 0;
 	size_t cbPasswordW;
-	int cchOutW = 0;
-	WCHAR* pbOutW = NULL;
+	size_t cchOutW = 0;
 	WINPR_CIPHER_CTX* aesDec = NULL;
 	WCHAR* PasswordW = NULL;
 	BYTE* pbIn = NULL;
 	BYTE* pbOut = NULL;
 	size_t cbOut, cbIn, cbFinal;
-	BYTE DerivedKey[WINPR_AES_BLOCK_SIZE];
-	BYTE InitializationVector[WINPR_AES_BLOCK_SIZE];
-	BYTE PasswordHash[WINPR_SHA1_DIGEST_LENGTH];
+	BYTE DerivedKey[WINPR_AES_BLOCK_SIZE] = { 0 };
+	BYTE InitializationVector[WINPR_AES_BLOCK_SIZE] = { 0 };
+	BYTE PasswordHash[WINPR_SHA1_DIGEST_LENGTH] = { 0 };
 
 	if (!file || !password)
 		return FALSE;
 
-	status = ConvertToUnicode(CP_UTF8, 0, password, -1, &PasswordW, 0);
-
-	if (status <= 0)
+	PasswordW = ConvertUtf8ToWCharAlloc(password, &cbPasswordW);
+	if (!PasswordW)
 	{
 		WLog_ERR(TAG, "Failed to parse ASSISTANCE file: Conversion from UCS2 to UTF8 failed");
 		return FALSE;
 	}
 
-	cbPasswordW = (size_t)(status - 1) * 2UL;
+	cbPasswordW = (cbPasswordW) * sizeof(WCHAR);
 
 	if (!winpr_Digest(WINPR_MD_SHA1, (BYTE*)PasswordW, cbPasswordW, PasswordHash,
 	                  sizeof(PasswordHash)))
@@ -658,7 +648,6 @@ static BOOL freerdp_assistance_decrypt2(rdpAssistanceFile* file, const char* pas
 	                                              sizeof(DerivedKey)))
 		goto fail;
 
-	ZeroMemory(InitializationVector, sizeof(InitializationVector));
 	aesDec =
 	    winpr_Cipher_New(WINPR_CIPHER_AES_128_CBC, WINPR_DECRYPT, DerivedKey, InitializationVector);
 
@@ -684,17 +673,17 @@ static BOOL freerdp_assistance_decrypt2(rdpAssistanceFile* file, const char* pas
 
 	cbOut += cbFinal;
 	cbFinal = 0;
-	pbOutW = (WCHAR*)pbOut;
 
-	if (cbOut > INT_MAX / 2)
-		goto fail;
+	union
+	{
+		const WCHAR* wc;
+		const BYTE* b;
+	} cnv;
 
-	cchOutW = (int)cbOut / 2;
-	file->ConnectionString2 = NULL;
-	status =
-	    ConvertFromUnicode(CP_UTF8, 0, pbOutW, cchOutW, &file->ConnectionString2, 0, NULL, NULL);
-
-	if (status <= 0)
+	cnv.b = pbOut;
+	cchOutW = cbOut / sizeof(WCHAR);
+	file->ConnectionString2 = ConvertWCharNToUtf8Alloc(cnv.wc, cchOutW, NULL);
+	if (!file->ConnectionString2)
 	{
 		WLog_ERR(TAG, "Failed to parse ASSISTANCE file: Conversion from UCS2 to UTF8 failed");
 		goto fail;
@@ -744,6 +733,7 @@ int freerdp_assistance_parse_file_buffer(rdpAssistanceFile* file, const char* bu
 	char* p;
 	char* q;
 	char* r;
+	char* amp;
 	int status;
 	size_t length;
 
@@ -896,6 +886,10 @@ int freerdp_assistance_parse_file_buffer(rdpAssistanceFile* file, const char* bu
 		if (p)
 		{
 			p += sizeof("PassStub=\"") - 1;
+
+			// needs to be unescaped (&amp; => &)
+			amp = strstr(p, "&amp;");
+
 			q = strchr(p, '"');
 
 			if (!q)
@@ -911,13 +905,31 @@ int freerdp_assistance_parse_file_buffer(rdpAssistanceFile* file, const char* bu
 				return -1;
 			}
 
-			length = q - p;
+			if (amp)
+			{
+				length = q - p - 4;
+			}
+			else
+			{
+				length = q - p;
+			}
+
 			file->PassStub = (char*)malloc(length + 1);
 
 			if (!file->PassStub)
 				return -1;
 
-			CopyMemory(file->PassStub, p, length);
+			if (amp)
+			{
+				// just skip over "amp;" leaving "&"
+				CopyMemory(file->PassStub, p, amp - p + 1);
+				CopyMemory(file->PassStub + (amp - p + 1), amp + 5, q - amp + 5);
+			}
+			else
+			{
+				CopyMemory(file->PassStub, p, length);
+			}
+
 			file->PassStub[length] = '\0';
 		}
 
@@ -1239,30 +1251,24 @@ BOOL freerdp_assistance_populate_settings_from_assistance_file(rdpAssistanceFile
 			return FALSE;
 	}
 
-	settings->RemoteAssistanceMode = TRUE;
+	if (!freerdp_settings_set_bool(settings, FreeRDP_RemoteAssistanceMode, TRUE))
+		return FALSE;
 
 	if (!freerdp_settings_set_uint32(settings, FreeRDP_ServerPort, file->MachinePorts[0]))
 		return FALSE;
 
-	freerdp_target_net_addresses_free(settings);
-	settings->TargetNetAddressCount = file->MachineCount;
+	if (!freerdp_settings_set_pointer_len(settings, FreeRDP_TargetNetAddresses, NULL,
+	                                      file->MachineCount))
+		return FALSE;
+	if (!freerdp_settings_set_pointer_len(settings, FreeRDP_TargetNetPorts, file->MachinePorts,
+	                                      file->MachineCount))
+		return FALSE;
 
-	if (settings->TargetNetAddressCount)
+	for (i = 0; i < file->MachineCount; i++)
 	{
-		settings->TargetNetAddresses = (char**)calloc(file->MachineCount, sizeof(char*));
-		settings->TargetNetPorts = (UINT32*)calloc(file->MachineCount, sizeof(UINT32));
-
-		if (!settings->TargetNetAddresses || !settings->TargetNetPorts)
+		if (!freerdp_settings_set_pointer_array(settings, FreeRDP_TargetNetAddresses, i,
+		                                        file->MachineAddresses[i]))
 			return FALSE;
-
-		for (i = 0; i < settings->TargetNetAddressCount; i++)
-		{
-			settings->TargetNetAddresses[i] = _strdup(file->MachineAddresses[i]);
-			settings->TargetNetPorts[i] = file->MachinePorts[i];
-
-			if (!settings->TargetNetAddresses[i])
-				return FALSE;
-		}
 	}
 
 	return TRUE;

@@ -260,7 +260,8 @@ static void freeArguments(int argc, char **argv)
 	if (!addArgument(&argc, &argv, "/kbd:%d", 0x409))
 		goto out_free;
 
-	status = freerdp_client_settings_parse_command_line(_freerdp->settings, argc, argv, FALSE);
+	status =
+	    freerdp_client_settings_parse_command_line(_freerdp->context->settings, argc, argv, FALSE);
 
 	if (0 != status)
 		goto out_free;
@@ -296,7 +297,7 @@ out_free:
 - (void)connect
 {
 	// Set Screen Size to automatic if widht or height are still 0
-	rdpSettings *settings = _freerdp->settings;
+	rdpSettings *settings = _freerdp->context->settings;
 
 	if (settings->DesktopWidth == 0 || settings->DesktopHeight == 0)
 	{
@@ -317,7 +318,7 @@ out_free:
 	// TODO: This is a hack to ensure connections to RDVH with 16bpp don't have an odd screen
 	// resolution width
 	//       Otherwise this could result in screen corruption ..
-	if (settings->ColorDepth <= 16)
+	if (freerdp_settings_get_uint32(settings, FreeRDP_ColorDepth) <= 16)
 		settings->DesktopWidth &= (~1);
 
 	[self performSelectorInBackground:@selector(runSession) withObject:nil];
@@ -413,7 +414,7 @@ out_free:
 
 - (rdpSettings *)getSessionParams
 {
-	return _freerdp->settings;
+	return _freerdp->context->settings;
 }
 
 - (NSString *)sessionName

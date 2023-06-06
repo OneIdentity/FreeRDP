@@ -20,18 +20,12 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
-
-#ifdef HAVE_UNISTD_H
-#include <unistd.h>
-#endif
 
 #ifndef _WIN32
 #include <sys/time.h>
@@ -44,6 +38,7 @@
 #include <winpr/stream.h>
 #include <winpr/collections.h>
 
+#include <freerdp/freerdp.h>
 #include <freerdp/client/tsmf.h>
 
 #include "tsmf_constants.h"
@@ -67,7 +62,7 @@
 #define VIDEO_MIN_BUFFER_LEVEL 10
 #define VIDEO_MAX_BUFFER_LEVEL 30
 
-struct _TSMF_PRESENTATION
+struct S_TSMF_PRESENTATION
 {
 	BYTE presentation_id[GUID_SIZE];
 
@@ -93,7 +88,7 @@ struct _TSMF_PRESENTATION
 	void* rects;
 };
 
-struct _TSMF_STREAM
+struct S_TSMF_STREAM
 {
 	UINT32 stream_id;
 
@@ -137,7 +132,7 @@ struct _TSMF_STREAM
 	BOOL seeking;
 };
 
-struct _TSMF_SAMPLE
+struct S_TSMF_SAMPLE
 {
 	UINT32 sample_id;
 	UINT64 start_time;
@@ -402,8 +397,8 @@ TSMF_PRESENTATION* tsmf_presentation_find_by_id(const BYTE* guid)
 	UINT32 index;
 	UINT32 count;
 	BOOL found = FALSE;
-	char guid_str[GUID_SIZE * 2 + 1];
-	TSMF_PRESENTATION* presentation;
+	char guid_str[GUID_SIZE * 2 + 1] = { 0 };
+	TSMF_PRESENTATION* presentation = NULL;
 	ArrayList_Lock(presentation_list);
 	count = ArrayList_Count(presentation_list);
 
@@ -485,20 +480,22 @@ static BOOL tsmf_sample_playback_video(TSMF_SAMPLE* sample)
 		   extract the Y values to create a grayscale image. */
 		static int frame_id = 0;
 		char buf[100];
-		FILE* fp;
 
 		if ((frame_id % 30) == 0)
 		{
 			sprintf_s(buf, sizeof(buf), "/tmp/FreeRDP_Frame_%d.ppm", frame_id);
-			fp = fopen(buf, "wb");
-			fwrite("P5\n", 1, 3, fp);
-			sprintf_s(buf, sizeof(buf), "%"PRIu32" %"PRIu32"\n", sample->stream->width,
-			          sample->stream->height);
-			fwrite(buf, 1, strnlen(buf, sizeof(buf)), fp);
-			fwrite("255\n", 1, 4, fp);
-			fwrite(sample->data, 1, sample->stream->width * sample->stream->height, fp);
-			fflush(fp);
-			fclose(fp);
+			FILE* fp = fopen(buf, "wb");
+			if (fp)
+			{
+				fwrite("P5\n", 1, 3, fp);
+				sprintf_s(buf, sizeof(buf), "%"PRIu32" %"PRIu32"\n", sample->stream->width,
+				          sample->stream->height);
+				fwrite(buf, 1, strnlen(buf, sizeof(buf)), fp);
+				fwrite("255\n", 1, 4, fp);
+				fwrite(sample->data, 1, sample->stream->width * sample->stream->height, fp);
+				fflush(fp);
+				fclose(fp);
+			}
 		}
 
 		frame_id++;
@@ -693,7 +690,6 @@ static BOOL tsmf_sample_playback(TSMF_SAMPLE* sample)
 	}
 	else
 	{
-		TSMF_STREAM* stream = sample->stream;
 		UINT64 ack_anticipation_time = get_current_time();
 		BOOL buffer_filled = TRUE;
 
@@ -1320,7 +1316,7 @@ TSMF_STREAM* tsmf_stream_find_by_id(TSMF_PRESENTATION* presentation, UINT32 stre
 	UINT32 index;
 	UINT32 count;
 	BOOL found = FALSE;
-	TSMF_STREAM* stream;
+	TSMF_STREAM* stream = NULL;
 	ArrayList_Lock(presentation->stream_list);
 	count = ArrayList_Count(presentation->stream_list);
 

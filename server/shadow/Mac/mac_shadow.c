@@ -41,7 +41,7 @@ static BOOL mac_shadow_input_synchronize_event(rdpShadowSubsystem* subsystem,
 }
 
 static BOOL mac_shadow_input_keyboard_event(rdpShadowSubsystem* subsystem, rdpShadowClient* client,
-                                            UINT16 flags, UINT16 code)
+                                            UINT16 flags, UINT8 code)
 {
 	DWORD vkcode;
 	DWORD keycode;
@@ -61,12 +61,8 @@ static BOOL mac_shadow_input_keyboard_event(rdpShadowSubsystem* subsystem, rdpSh
 	if (extended)
 		vkcode |= KBDEXT;
 
-	keycode = GetKeycodeFromVirtualKeyCode(vkcode, KEYCODE_TYPE_APPLE);
+	keycode = GetKeycodeFromVirtualKeyCode(vkcode, WINPR_KEYCODE_TYPE_APPLE);
 
-	if (keycode < 8)
-		return TRUE;
-
-	keycode -= 8;
 	source = CGEventSourceCreate(kCGEventSourceStateHIDSystemState);
 
 	if (flags & KBD_FLAGS_DOWN)
@@ -327,8 +323,8 @@ static int freerdp_image_copy_from_retina(BYTE* pDstData, DWORD DstFormat, int n
 	if (nSrcStep < 0)
 		nSrcStep = srcBytesPerPixel * nWidth;
 
-	dstBitsPerPixel = GetBitsPerPixel(DstFormat);
-	dstBytesPerPixel = GetBytesPerPixel(DstFormat);
+	dstBitsPerPixel = FreeRDPGetBitsPerPixel(DstFormat);
+	dstBytesPerPixel = FreeRDPGetBytesPerPixel(DstFormat);
 
 	if (nDstStep < 0)
 		nDstStep = dstBytesPerPixel * nWidth;
@@ -350,7 +346,7 @@ static int freerdp_image_copy_from_retina(BYTE* pDstData, DWORD DstFormat, int n
 			R = pSrcPixel[2] + pSrcPixel[6] + pSrcPixel[nSrcStep + 2] + pSrcPixel[nSrcStep + 6];
 			pSrcPixel += 8;
 			color = FreeRDPGetColor(DstFormat, R >> 2, G >> 2, B >> 2, 0xFF);
-			WriteColor(pDstPixel, DstFormat, color);
+			FreeRDPWriteColor(pDstPixel, DstFormat, color);
 			pDstPixel += dstBytesPerPixel;
 		}
 

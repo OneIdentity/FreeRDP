@@ -17,10 +17,9 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <winpr/config.h>
 
+#ifndef _WIN32
 #include <winpr/bcrypt.h>
 
 /**
@@ -111,3 +110,5 @@ NTSTATUS BCryptDecrypt(BCRYPT_KEY_HANDLE hKey, PUCHAR pbInput, ULONG cbInput, VO
 {
 	return 0;
 }
+
+#endif /* _WIN32 */

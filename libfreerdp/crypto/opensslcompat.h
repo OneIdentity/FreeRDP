@@ -20,9 +20,7 @@
 #ifndef FREERDP_LIB_CRYPTO_OPENSSLCOMPAT_H
 #define FREERDP_LIB_CRYPTO_OPENSSLCOMPAT_H
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <freerdp/api.h>
 
@@ -30,7 +28,8 @@
 
 #include <openssl/opensslv.h>
 
-#if OPENSSL_VERSION_NUMBER < 0x10100000L || defined(LIBRESSL_VERSION_NUMBER)
+#if OPENSSL_VERSION_NUMBER < 0x10100000L || \
+    (defined(LIBRESSL_VERSION_NUMBER) && LIBRESSL_VERSION_NUMBER < 0x2070000fL)
 
 #include <openssl/bio.h>
 #include <openssl/rsa.h>

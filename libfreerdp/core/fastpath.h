@@ -55,18 +55,6 @@ enum FASTPATH_OUTPUT_ACTION_TYPE
 	FASTPATH_OUTPUT_ACTION_X224 = 0x3
 };
 
-enum FASTPATH_INPUT_ENCRYPTION_FLAGS
-{
-	FASTPATH_INPUT_SECURE_CHECKSUM = 0x1,
-	FASTPATH_INPUT_ENCRYPTED = 0x2
-};
-
-enum FASTPATH_OUTPUT_ENCRYPTION_FLAGS
-{
-	FASTPATH_OUTPUT_SECURE_CHECKSUM = 0x1,
-	FASTPATH_OUTPUT_ENCRYPTED = 0x2
-};
-
 enum FASTPATH_UPDATETYPE
 {
 	FASTPATH_UPDATETYPE_ORDERS = 0x0,
@@ -114,9 +102,8 @@ enum FASTPATH_INPUT_KBDFLAGS
 	FASTPATH_INPUT_KBDFLAGS_PREFIX_E1 = 0x04 /* for pause sequence */
 };
 
-struct _FASTPATH_UPDATE_PDU_HEADER
+typedef struct
 {
-	BYTE fpOutputHeader;
 	BYTE length1;
 	BYTE length2;
 	BYTE fipsInformation[4];
@@ -125,24 +112,23 @@ struct _FASTPATH_UPDATE_PDU_HEADER
 	BYTE action;
 	BYTE secFlags;
 	UINT16 length;
-};
-typedef struct _FASTPATH_UPDATE_PDU_HEADER FASTPATH_UPDATE_PDU_HEADER;
+} FASTPATH_UPDATE_PDU_HEADER;
 
-struct _FASTPATH_UPDATE_HEADER
+typedef struct
 {
-	BYTE updateHeader;
 	BYTE compressionFlags;
 	UINT16 size;
 
 	BYTE updateCode;
 	BYTE fragmentation;
 	BYTE compression;
-};
-typedef struct _FASTPATH_UPDATE_HEADER FASTPATH_UPDATE_HEADER;
+} FASTPATH_UPDATE_HEADER;
 
 FREERDP_LOCAL BOOL fastpath_read_header_rdp(rdpFastPath* fastpath, wStream* s, UINT16* length);
 FREERDP_LOCAL int fastpath_recv_updates(rdpFastPath* fastpath, wStream* s);
 FREERDP_LOCAL int fastpath_recv_inputs(rdpFastPath* fastpath, wStream* s);
+
+FREERDP_LOCAL BOOL fastpath_decrypt(rdpFastPath* fastpath, wStream* s, UINT16* length);
 
 FREERDP_LOCAL wStream* fastpath_input_pdu_init_header(rdpFastPath* fastpath);
 FREERDP_LOCAL wStream* fastpath_input_pdu_init(rdpFastPath* fastpath, BYTE eventFlags,

@@ -17,9 +17,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <winpr/config.h>
 
 #include "FileAppender.h"
 #include "Message.h"
@@ -29,7 +27,7 @@
 #include <winpr/file.h>
 #include <winpr/path.h>
 
-struct _wLogFileAppender
+typedef struct
 {
 	WLOG_APPENDER_COMMON();
 
@@ -37,8 +35,7 @@ struct _wLogFileAppender
 	char* FilePath;
 	char* FullFileName;
 	FILE* FileDescriptor;
-};
-typedef struct _wLogFileAppender wLogFileAppender;
+} wLogFileAppender;
 
 static BOOL WLog_FileAppender_SetOutputFileName(wLogFileAppender* appender, const char* filename)
 {
@@ -132,7 +129,7 @@ static BOOL WLog_FileAppender_Close(wLog* log, wLogAppender* appender)
 static BOOL WLog_FileAppender_WriteMessage(wLog* log, wLogAppender* appender, wLogMessage* message)
 {
 	FILE* fp;
-	char prefix[WLOG_MAX_PREFIX_SIZE];
+	char prefix[WLOG_MAX_PREFIX_SIZE] = { 0 };
 	wLogFileAppender* fileAppender;
 
 	if (!log || !appender || !message)
@@ -198,12 +195,11 @@ static BOOL WLog_FileAppender_Set(wLogAppender* appender, const char* setting, v
 
 	if (!strcmp("outputfilename", setting))
 		return WLog_FileAppender_SetOutputFileName(fileAppender, (const char*)value);
-	else if (!strcmp("outputfilepath", setting))
-		return WLog_FileAppender_SetOutputFilePath(fileAppender, (const char*)value);
-	else
-		return FALSE;
 
-	return TRUE;
+	if (!strcmp("outputfilepath", setting))
+		return WLog_FileAppender_SetOutputFilePath(fileAppender, (const char*)value);
+
+	return FALSE;
 }
 
 static void WLog_FileAppender_Free(wLogAppender* appender)

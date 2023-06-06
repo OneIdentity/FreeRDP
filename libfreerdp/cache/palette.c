@@ -17,18 +17,16 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <stdio.h>
 
 #include <winpr/crt.h>
 
 #include <freerdp/log.h>
-#include <freerdp/cache/palette.h>
 
 #include "palette.h"
+#include "cache.h"
 
 #define TAG FREERDP_TAG("cache.palette")
 

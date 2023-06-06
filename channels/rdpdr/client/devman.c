@@ -21,9 +21,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -40,6 +38,8 @@
 #include "rdpdr_main.h"
 
 #include "devman.h"
+
+#define TAG CHANNELS_TAG("rdpdr.client")
 
 static void devman_device_free(void* obj)
 {
@@ -62,7 +62,7 @@ DEVMAN* devman_new(rdpdrPlugin* rdpdr)
 
 	if (!devman)
 	{
-		WLog_INFO(TAG, "calloc failed!");
+		WLog_Print(rdpdr->log, WLOG_INFO, "calloc failed!");
 		return NULL;
 	}
 
@@ -72,7 +72,7 @@ DEVMAN* devman_new(rdpdrPlugin* rdpdr)
 
 	if (!devman->devices)
 	{
-		WLog_INFO(TAG, "ListDictionary_New failed!");
+		WLog_Print(rdpdr->log, WLOG_INFO, "ListDictionary_New failed!");
 		free(devman);
 		return NULL;
 	}
@@ -130,9 +130,14 @@ DEVICE* devman_get_device_by_id(DEVMAN* devman, UINT32 id)
 	void* key = (void*)(size_t)id;
 
 	if (!devman)
+	{
+		WLog_ERR(TAG, "device manager=%p", devman);
 		return NULL;
+	}
 
 	device = (DEVICE*)ListDictionary_GetItemValue(devman->devices, key);
+	if (!device)
+		WLog_WARN(TAG, "could not find device ID 0x%08" PRIx32, id);
 	return device;
 }
 
@@ -183,7 +188,8 @@ UINT devman_load_device_service(DEVMAN* devman, const RDPDR_DEVICE* device, rdpC
 	const char* ServiceName = NULL;
 	DEVICE_SERVICE_ENTRY_POINTS ep;
 	PDEVICE_SERVICE_ENTRY entry = NULL;
-	union {
+	union
+	{
 		const RDPDR_DEVICE* cdp;
 		RDPDR_DEVICE* dp;
 	} devconv;

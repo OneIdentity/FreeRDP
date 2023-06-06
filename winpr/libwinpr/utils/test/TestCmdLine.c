@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <winpr/crt.h>
+#include <winpr/assert.h>
 #include <winpr/tchar.h>
 #include <winpr/cmdline.h>
 #include <winpr/strlst.h>
@@ -17,6 +18,102 @@ static const char* testArgv[] = { "mstsc.exe",
 	                              "/valuelist:value1,value2",
 	                              "/valuelist-empty:",
 	                              0 };
+
+static const char testListAppName[] = "test app name";
+static const char* testListArgs[] = {
+	"a,b,c,d", "a:,\"b:xxx, yyy\",c", "a:,,,b",      "a:,\",b",       "\"a,b,c,d d d,fff\"", "",
+	NULL,      "'a,b,\",c'",          "\"a,b,',c\"", "', a, ', b,c'", "\"a,b,\",c\""
+};
+
+static const char* testListArgs1[] = { testListAppName, "a", "b", "c", "d" };
+static const char* testListArgs2[] = { testListAppName, "a:", "b:xxx, yyy", "c" };
+// static const char* testListArgs3[] = {};
+// static const char* testListArgs4[] = {};
+static const char* testListArgs5[] = { testListAppName, "a", "b", "c", "d d d", "fff" };
+static const char* testListArgs6[] = { testListAppName };
+static const char* testListArgs7[] = { testListAppName };
+static const char* testListArgs8[] = { testListAppName, "a", "b", "\"", "c" };
+static const char* testListArgs9[] = { testListAppName, "a", "b", "'", "c" };
+// static const char* testListArgs10[] = {};
+// static const char* testListArgs11[] = {};
+
+static const char** testListArgsResult[] = { testListArgs1,
+	                                         testListArgs2,
+	                                         NULL /* testListArgs3 */,
+	                                         NULL /* testListArgs4 */,
+	                                         testListArgs5,
+	                                         testListArgs6,
+	                                         testListArgs7,
+	                                         testListArgs8,
+	                                         testListArgs9,
+	                                         NULL /* testListArgs10 */,
+	                                         NULL /* testListArgs11 */ };
+static const size_t testListArgsCount[] = {
+	ARRAYSIZE(testListArgs1),
+	ARRAYSIZE(testListArgs2),
+	0 /* ARRAYSIZE(testListArgs3) */,
+	0 /* ARRAYSIZE(testListArgs4) */,
+	ARRAYSIZE(testListArgs5),
+	ARRAYSIZE(testListArgs6),
+	ARRAYSIZE(testListArgs7),
+	ARRAYSIZE(testListArgs8),
+	ARRAYSIZE(testListArgs9),
+	0 /* ARRAYSIZE(testListArgs10) */,
+	0 /* ARRAYSIZE(testListArgs11) */
+};
+
+static BOOL checkResult(size_t index, char** actual, size_t actualCount)
+{
+	const char** result = testListArgsResult[index];
+	const size_t resultCount = testListArgsCount[index];
+
+	if (resultCount != actualCount)
+		return FALSE;
+
+	if (actualCount == 0)
+	{
+		return (actual == NULL);
+	}
+	else
+	{
+		size_t x;
+
+		if (!actual)
+			return FALSE;
+
+		for (x = 0; x < actualCount; x++)
+		{
+			const char* a = result[x];
+			const char* b = actual[x];
+
+			if (strcmp(a, b) != 0)
+				return FALSE;
+		}
+	}
+
+	return TRUE;
+}
+
+static BOOL TestCommandLineParseCommaSeparatedValuesEx(void)
+{
+	size_t x;
+
+	WINPR_ASSERT(ARRAYSIZE(testListArgs) == ARRAYSIZE(testListArgsResult));
+	WINPR_ASSERT(ARRAYSIZE(testListArgs) == ARRAYSIZE(testListArgsCount));
+
+	for (x = 0; x < ARRAYSIZE(testListArgs); x++)
+	{
+		const char* list = testListArgs[x];
+		size_t count = 42;
+		char** ptr = CommandLineParseCommaSeparatedValuesEx(testListAppName, list, &count);
+		BOOL valid = checkResult(x, ptr, count);
+		free(ptr);
+		if (!valid)
+			return FALSE;
+	}
+
+	return TRUE;
+}
 
 int TestCmdLine(int argc, char* argv[])
 {
@@ -61,6 +158,7 @@ int TestCmdLine(int argc, char* argv[])
 		  "protocol security negotiation" },
 		{ "sec", COMMAND_LINE_VALUE_REQUIRED, NULL, NULL, NULL, -1, NULL,
 		  "force specific protocol security" },
+#if defined(WITH_FREERDP_DEPRECATED)
 		{ "sec-rdp", COMMAND_LINE_VALUE_BOOL, NULL, BoolValueTrue, NULL, -1, NULL,
 		  "rdp protocol security" },
 		{ "sec-tls", COMMAND_LINE_VALUE_BOOL, NULL, BoolValueTrue, NULL, -1, NULL,
@@ -73,6 +171,7 @@ int TestCmdLine(int argc, char* argv[])
 		  "certificate name" },
 		{ "cert-ignore", COMMAND_LINE_VALUE_FLAG, NULL, NULL, NULL, -1, NULL,
 		  "ignore certificate" },
+#endif
 		{ "valuelist", COMMAND_LINE_VALUE_REQUIRED, "<val1>,<val2>", NULL, NULL, -1, NULL,
 		  "List of comma separated values." },
 		{ "valuelist-empty", COMMAND_LINE_VALUE_REQUIRED, "<val1>,<val2>", NULL, NULL, -1, NULL,
@@ -250,5 +349,8 @@ int TestCmdLine(int argc, char* argv[])
 
 out:
 	string_list_free(command_line);
+
+	if (!TestCommandLineParseCommaSeparatedValuesEx())
+		return -1;
 	return ret;
 }

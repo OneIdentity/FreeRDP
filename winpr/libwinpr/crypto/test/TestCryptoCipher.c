@@ -4,14 +4,14 @@
 #include <winpr/crypto.h>
 #include <winpr/ssl.h>
 
-static BOOL test_crypto_cipher_aes_128_cbc()
+static BOOL test_crypto_cipher_aes_128_cbc(void)
 {
 	WINPR_CIPHER_CTX* ctx;
 	BOOL result = FALSE;
 	BYTE key[] = "0123456789abcdeF";
 	BYTE iv[] = "1234567887654321";
-	BYTE ibuf[1024];
-	BYTE obuf[1024];
+	BYTE ibuf[1024] = { 0 };
+	BYTE obuf[1024] = { 0 };
 	size_t ilen;
 	size_t olen;
 	size_t xlen;
@@ -25,9 +25,6 @@ static BOOL test_crypto_cipher_aes_128_cbc()
 		fprintf(stderr, "%s: winpr_Cipher_New (encrypt) failed\n", __FUNCTION__);
 		return FALSE;
 	}
-
-	memset(ibuf, 0, sizeof(ibuf));
-	memset(obuf, 0, sizeof(obuf));
 
 	ilen = strnlen(plaintext, sizeof(plaintext)) + 1;
 	memcpy(ibuf, plaintext, ilen);
@@ -113,7 +110,7 @@ static const BYTE* TEST_RC4_KEY = (BYTE*)"Key";
 static const char* TEST_RC4_PLAINTEXT = "Plaintext";
 static const BYTE* TEST_RC4_CIPHERTEXT = (BYTE*)"\xBB\xF3\x16\xE8\xD9\x40\xAF\x0A\xD3";
 
-static BOOL test_crypto_cipher_rc4()
+static BOOL test_crypto_cipher_rc4(void)
 {
 	size_t len;
 	BOOL rc = FALSE;
@@ -178,15 +175,12 @@ static const BYTE* TEST_CIPHER_KEY =
 static const BYTE* TEST_CIPHER_IV =
     (BYTE*)"\xFE\xE3\x9F\xF0\xD1\x5E\x37\x0C\xAB\xAB\x9B\x04\xF3\xDB\x99\x15";
 
-static BOOL test_crypto_cipher_key()
+static BOOL test_crypto_cipher_key(void)
 {
 	int status;
-	BYTE key[32];
-	BYTE iv[16];
+	BYTE key[32] = { 0 };
+	BYTE iv[16] = { 0 };
 	BYTE salt[8] = { 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77 };
-
-	ZeroMemory(key, sizeof(key));
-	ZeroMemory(iv, sizeof(iv));
 
 	status = winpr_Cipher_BytesToKey(WINPR_CIPHER_AES_256_CBC, WINPR_MD_SHA1, salt, TEST_RAND_DATA,
 	                                 64, 4, key, iv);

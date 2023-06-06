@@ -17,9 +17,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <winpr/config.h>
 
 #include <winpr/windows.h>
 
@@ -41,7 +39,7 @@
 #pragma clang diagnostic ignored "-Wreserved-id-macro"
 #endif
 
-#ifdef HAVE_UNISTD_H
+#ifdef WINPR_HAVE_UNISTD_H
 #ifndef _XOPEN_SOURCE
 #define _XOPEN_SOURCE 500
 #endif
@@ -65,15 +63,17 @@ DWORD SleepEx(DWORD dwMilliseconds, BOOL bAlertable)
 	DWORD ret = WAIT_FAILED;
 	BOOL autoSignalled;
 
-	if (!thread)
+	if (thread)
 	{
-		WLog_ERR(TAG, "unable to retrieve currentThread");
-		return WAIT_FAILED;
+		/* treat re-entrancy if a completion is calling us */
+		if (thread->apc.treatingCompletions)
+			bAlertable = FALSE;
 	}
-
-	/* treat re-entrancy if a completion is calling us */
-	if (thread->apc.treatingCompletions)
+	else
+	{
+		/* called from a non WinPR thread */
 		bAlertable = FALSE;
+	}
 
 	if (!bAlertable || !thread->apc.length)
 	{

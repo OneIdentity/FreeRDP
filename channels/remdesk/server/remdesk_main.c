@@ -19,13 +19,13 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <winpr/crt.h>
 #include <winpr/print.h>
 #include <winpr/stream.h>
+
+#include <freerdp/freerdp.h>
 
 #include "remdesk_main.h"
 
@@ -50,15 +50,10 @@ static UINT remdesk_virtual_channel_write(RemdeskServerContext* context, wStream
  */
 static UINT remdesk_read_channel_header(wStream* s, REMDESK_CHANNEL_HEADER* header)
 {
-	int status;
 	UINT32 ChannelNameLen;
-	char* pChannelName = NULL;
 
-	if (Stream_GetRemainingLength(s) < 8)
-	{
-		WLog_ERR(TAG, "Stream_GetRemainingLength failed!");
+	if (!Stream_CheckAndLogRequiredLength(TAG, s, 8))
 		return CHANNEL_RC_NO_MEMORY;
-	}
 
 	Stream_Read_UINT32(s, ChannelNameLen);     /* ChannelNameLen (4 bytes) */
 	Stream_Read_UINT32(s, header->DataLength); /* DataLen (4 bytes) */
@@ -75,23 +70,10 @@ static UINT remdesk_read_channel_header(wStream* s, REMDESK_CHANNEL_HEADER* head
 		return ERROR_INVALID_DATA;
 	}
 
-	if (Stream_GetRemainingLength(s) < ChannelNameLen)
-	{
-		WLog_ERR(TAG, "Stream_GetRemainingLength failed!");
+	if (Stream_Read_UTF16_String_As_UTF8_Buffer(s, ChannelNameLen / sizeof(WCHAR),
+	                                            header->ChannelName,
+	                                            ARRAYSIZE(header->ChannelName)) < 0)
 		return ERROR_INVALID_DATA;
-	}
-
-	ZeroMemory(header->ChannelName, sizeof(header->ChannelName));
-	pChannelName = (char*)header->ChannelName;
-	status = ConvertFromUnicode(CP_UTF8, 0, (WCHAR*)Stream_Pointer(s), ChannelNameLen / 2,
-	                            &pChannelName, 32, NULL, NULL);
-	Stream_Seek(s, ChannelNameLen);
-
-	if (status <= 0)
-	{
-		WLog_ERR(TAG, "ConvertFromUnicode failed!");
-		return ERROR_INVALID_DATA;
-	}
 
 	return CHANNEL_RC_OK;
 }
@@ -105,8 +87,7 @@ static UINT remdesk_write_channel_header(wStream* s, REMDESK_CHANNEL_HEADER* hea
 {
 	int index;
 	UINT32 ChannelNameLen;
-	WCHAR ChannelNameW[32];
-	ZeroMemory(ChannelNameW, sizeof(ChannelNameW));
+	WCHAR ChannelNameW[32] = { 0 };
 
 	for (index = 0; index < 32; index++)
 	{
@@ -253,14 +234,18 @@ static UINT remdesk_recv_ctl_version_info_pdu(RemdeskServerContext* context, wSt
 	UINT32 versionMajor;
 	UINT32 versionMinor;
 
-	if (Stream_GetRemainingLength(s) < 8)
-	{
-		WLog_ERR(TAG, "Stream_GetRemainingLength failed!");
+	if (!Stream_CheckAndLogRequiredLength(TAG, s, 8))
 		return ERROR_INVALID_DATA;
-	}
 
 	Stream_Read_UINT32(s, versionMajor); /* versionMajor (4 bytes) */
 	Stream_Read_UINT32(s, versionMinor); /* versionMinor (4 bytes) */
+	if ((versionMajor != 1) || (versionMinor != 2))
+	{
+		WLog_ERR(TAG, "REMOTEDESKTOP_CTL_VERSIONINFO_PACKET invalid version %" PRIu32 ".%" PRIu32,
+		         versionMajor, versionMinor);
+		return ERROR_INVALID_DATA;
+	}
+
 	return CHANNEL_RC_OK;
 }
 
@@ -272,11 +257,10 @@ static UINT remdesk_recv_ctl_version_info_pdu(RemdeskServerContext* context, wSt
 static UINT remdesk_recv_ctl_remote_control_desktop_pdu(RemdeskServerContext* context, wStream* s,
                                                         REMDESK_CHANNEL_HEADER* header)
 {
-	int status;
-	int cchStringW;
+	SSIZE_T cchStringW;
 	WCHAR* pStringW;
 	UINT32 msgLength;
-	int cbRaConnectionStringW = 0;
+	SSIZE_T cbRaConnectionStringW = 0;
 	WCHAR* raConnectionStringW = NULL;
 	REMDESK_CTL_REMOTE_CONTROL_DESKTOP_PDU pdu;
 	UINT error;
@@ -296,15 +280,10 @@ static UINT remdesk_recv_ctl_remote_control_desktop_pdu(RemdeskServerContext* co
 
 	cchStringW++;
 	cbRaConnectionStringW = cchStringW * 2;
-	pdu.raConnectionString = NULL;
-	status = ConvertFromUnicode(CP_UTF8, 0, raConnectionStringW, cbRaConnectionStringW / 2,
-	                            &pdu.raConnectionString, 0, NULL, NULL);
-
-	if (status <= 0)
-	{
-		WLog_ERR(TAG, "ConvertFromUnicode failed!");
+	pdu.raConnectionString =
+	    ConvertWCharNToUtf8Alloc(raConnectionStringW, cbRaConnectionStringW / sizeof(WCHAR), NULL);
+	if (!pdu.raConnectionString)
 		return ERROR_INTERNAL_ERROR;
-	}
 
 	WLog_INFO(TAG, "RaConnectionString: %s", pdu.raConnectionString);
 	free(pdu.raConnectionString);
@@ -323,7 +302,6 @@ static UINT remdesk_recv_ctl_remote_control_desktop_pdu(RemdeskServerContext* co
 static UINT remdesk_recv_ctl_authenticate_pdu(RemdeskServerContext* context, wStream* s,
                                               REMDESK_CHANNEL_HEADER* header)
 {
-	int status;
 	int cchStringW;
 	WCHAR* pStringW;
 	UINT32 msgLength;
@@ -363,23 +341,14 @@ static UINT remdesk_recv_ctl_authenticate_pdu(RemdeskServerContext* context, wSt
 
 	cchStringW++;
 	cbExpertBlobW = cchStringW * 2;
-	pdu.raConnectionString = NULL;
-	status = ConvertFromUnicode(CP_UTF8, 0, raConnectionStringW, cbRaConnectionStringW / 2,
-	                            &pdu.raConnectionString, 0, NULL, NULL);
-
-	if (status <= 0)
-	{
-		WLog_ERR(TAG, "ConvertFromUnicode failed!");
+	pdu.raConnectionString =
+	    ConvertWCharNToUtf8Alloc(raConnectionStringW, cbRaConnectionStringW / sizeof(WCHAR), NULL);
+	if (!pdu.raConnectionString)
 		return ERROR_INTERNAL_ERROR;
-	}
 
-	pdu.expertBlob = NULL;
-	status = ConvertFromUnicode(CP_UTF8, 0, expertBlobW, cbExpertBlobW / 2, &pdu.expertBlob, 0,
-	                            NULL, NULL);
-
-	if (status <= 0)
+	pdu.expertBlob = ConvertWCharNToUtf8Alloc(expertBlobW, cbExpertBlobW / sizeof(WCHAR), NULL);
+	if (!pdu.expertBlob)
 	{
-		WLog_ERR(TAG, "ConvertFromUnicode failed!");
 		free(pdu.raConnectionString);
 		return ERROR_INTERNAL_ERROR;
 	}
@@ -398,29 +367,20 @@ static UINT remdesk_recv_ctl_authenticate_pdu(RemdeskServerContext* context, wSt
 static UINT remdesk_recv_ctl_verify_password_pdu(RemdeskServerContext* context, wStream* s,
                                                  REMDESK_CHANNEL_HEADER* header)
 {
-	int status;
-	int cbExpertBlobW = 0;
+	SSIZE_T cbExpertBlobW = 0;
 	WCHAR* expertBlobW = NULL;
 	REMDESK_CTL_VERIFY_PASSWORD_PDU pdu;
 	UINT error;
 
-	if (Stream_GetRemainingLength(s) < 8)
-	{
-		WLog_ERR(TAG, "Stream_GetRemainingLength failed!");
+	if (!Stream_CheckAndLogRequiredLength(TAG, s, 8))
 		return ERROR_INVALID_DATA;
-	}
 
-	pdu.expertBlob = NULL;
 	expertBlobW = (WCHAR*)Stream_Pointer(s);
 	cbExpertBlobW = header->DataLength - 4;
-	status = ConvertFromUnicode(CP_UTF8, 0, expertBlobW, cbExpertBlobW / 2, &pdu.expertBlob, 0,
-	                            NULL, NULL);
 
-	if (status <= 0)
-	{
-		WLog_ERR(TAG, "ConvertFromUnicode failed!");
+	pdu.expertBlob = ConvertWCharNToUtf8Alloc(expertBlobW, cbExpertBlobW / sizeof(WCHAR), NULL);
+	if (pdu.expertBlob)
 		return ERROR_INTERNAL_ERROR;
-	}
 
 	WLog_INFO(TAG, "ExpertBlob: %s", pdu.expertBlob);
 
@@ -441,11 +401,8 @@ static UINT remdesk_recv_ctl_pdu(RemdeskServerContext* context, wStream* s,
 	UINT error = CHANNEL_RC_OK;
 	UINT32 msgType = 0;
 
-	if (Stream_GetRemainingLength(s) < 4)
-	{
-		WLog_ERR(TAG, "Stream_GetRemainingLength failed!");
+	if (!Stream_CheckAndLogRequiredLength(TAG, s, 4))
 		return ERROR_INVALID_DATA;
-	}
 
 	Stream_Read_UINT32(s, msgType); /* msgType (4 bytes) */
 	WLog_INFO(TAG, "msgType: %" PRIu32 "", msgType);

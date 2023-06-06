@@ -53,22 +53,20 @@ static UINT32 x11_shadow_enum_monitors(MONITOR_DEF* monitors, UINT32 maxMonitors
 
 #include <security/pam_appl.h>
 
-struct _SHADOW_PAM_AUTH_DATA
+typedef struct
 {
 	const char* user;
 	const char* domain;
 	const char* password;
-};
-typedef struct _SHADOW_PAM_AUTH_DATA SHADOW_PAM_AUTH_DATA;
+} SHADOW_PAM_AUTH_DATA;
 
-struct _SHADOW_PAM_AUTH_INFO
+typedef struct
 {
 	char* service_name;
 	pam_handle_t* handle;
 	struct pam_conv pamc;
 	SHADOW_PAM_AUTH_DATA appdata;
-};
-typedef struct _SHADOW_PAM_AUTH_INFO SHADOW_PAM_AUTH_INFO;
+} SHADOW_PAM_AUTH_INFO;
 
 static int x11_shadow_pam_conv(int num_msg, const struct pam_message** msg,
                                struct pam_response** resp, void* appdata_ptr)
@@ -203,17 +201,18 @@ static BOOL x11_shadow_input_synchronize_event(rdpShadowSubsystem* subsystem,
                                                rdpShadowClient* client, UINT32 flags)
 {
 	/* TODO: Implement */
-	WLog_WARN(TAG, "%s not implemented", __FUNCTION__);
+	WLog_WARN(TAG, "not implemented");
 	return TRUE;
 }
 
 static BOOL x11_shadow_input_keyboard_event(rdpShadowSubsystem* subsystem, rdpShadowClient* client,
-                                            UINT16 flags, UINT16 code)
+                                            UINT16 flags, UINT8 code)
 {
 #ifdef WITH_XTEST
 	x11ShadowSubsystem* x11 = (x11ShadowSubsystem*)subsystem;
 	DWORD vkcode;
 	DWORD keycode;
+	DWORD scancode;
 	BOOL extended = FALSE;
 
 	if (!client || !subsystem)
@@ -222,25 +221,26 @@ static BOOL x11_shadow_input_keyboard_event(rdpShadowSubsystem* subsystem, rdpSh
 	if (flags & KBD_FLAGS_EXTENDED)
 		extended = TRUE;
 
+	scancode = code;
 	if (extended)
-		code |= KBDEXT;
+		scancode |= KBDEXT;
 
-	vkcode = GetVirtualKeyCodeFromVirtualScanCode(code, 4);
+	vkcode = GetVirtualKeyCodeFromVirtualScanCode(scancode, WINPR_KBD_TYPE_IBM_ENHANCED);
 
 	if (extended)
 		vkcode |= KBDEXT;
 
-	keycode = GetKeycodeFromVirtualKeyCode(vkcode, KEYCODE_TYPE_EVDEV);
+	keycode = GetKeycodeFromVirtualKeyCode(vkcode, WINPR_KEYCODE_TYPE_XKB);
 
 	if (keycode != 0)
 	{
 		XLockDisplay(x11->display);
 		XTestGrabControl(x11->display, True);
 
-		if (flags & KBD_FLAGS_DOWN)
-			XTestFakeKeyEvent(x11->display, keycode, True, CurrentTime);
-		else if (flags & KBD_FLAGS_RELEASE)
+		if (flags & KBD_FLAGS_RELEASE)
 			XTestFakeKeyEvent(x11->display, keycode, False, CurrentTime);
+		else
+			XTestFakeKeyEvent(x11->display, keycode, True, CurrentTime);
 
 		XTestGrabControl(x11->display, False);
 		XFlush(x11->display);
@@ -256,7 +256,7 @@ static BOOL x11_shadow_input_unicode_keyboard_event(rdpShadowSubsystem* subsyste
                                                     UINT16 code)
 {
 	/* TODO: Implement */
-	WLog_WARN(TAG, "%s not implemented", __FUNCTION__);
+	WLog_WARN(TAG, "not implemented");
 	return TRUE;
 }
 
@@ -343,7 +343,7 @@ static BOOL x11_shadow_input_extended_mouse_event(rdpShadowSubsystem* subsystem,
 {
 #ifdef WITH_XTEST
 	x11ShadowSubsystem* x11 = (x11ShadowSubsystem*)subsystem;
-	int button = 0;
+	UINT button = 0;
 	BOOL down = FALSE;
 	rdpShadowServer* server;
 	rdpShadowSurface* surface;
@@ -596,7 +596,7 @@ static void x11_shadow_validate_region(x11ShadowSubsystem* subsystem, int x, int
 	region.y = y;
 	region.width = width;
 	region.height = height;
-#ifdef WITH_XFIXES
+#if defined(WITH_XFIXES) && defined(WITH_XDAMAGE)
 	XLockDisplay(subsystem->display);
 	XFixesSetRegion(subsystem->display, subsystem->xdamage_region, &region, 1);
 	XDamageSubtract(subsystem->display, subsystem->xdamage, subsystem->xdamage_region, None);
@@ -609,8 +609,8 @@ static int x11_shadow_blend_cursor(x11ShadowSubsystem* subsystem)
 	UINT32 x, y;
 	UINT32 nXSrc;
 	UINT32 nYSrc;
-	UINT32 nXDst;
-	UINT32 nYDst;
+	INT64 nXDst;
+	INT64 nYDst;
 	UINT32 nWidth;
 	UINT32 nHeight;
 	UINT32 nSrcStep;
@@ -641,7 +641,7 @@ static int x11_shadow_blend_cursor(x11ShadowSubsystem* subsystem)
 		if (nXDst >= nWidth)
 			return 1;
 
-		nXSrc = nXDst;
+		nXSrc = (UINT32)nXDst;
 		nWidth -= nXDst;
 		nXDst = 0;
 	}
@@ -656,7 +656,7 @@ static int x11_shadow_blend_cursor(x11ShadowSubsystem* subsystem)
 		if (nYDst >= nHeight)
 			return 1;
 
-		nYSrc = nYDst;
+		nYSrc = (UINT32)nYDst;
 		nHeight -= nYDst;
 		nYDst = 0;
 	}
@@ -782,7 +782,7 @@ static int x11_shadow_screen_grab(x11ShadowSubsystem* subsystem)
 	 * changed outside. We will resize to correct resolution at next frame
 	 */
 	XSetErrorHandler(x11_shadow_error_handler_for_capture);
-
+#if defined(WITH_XDAMAGE)
 	if (subsystem->use_xshm)
 	{
 		image = subsystem->fb_image;
@@ -796,6 +796,7 @@ static int x11_shadow_screen_grab(x11ShadowSubsystem* subsystem)
 		LeaveCriticalSection(&surface->lock);
 	}
 	else
+#endif
 	{
 		EnterCriticalSection(&surface->lock);
 		image = XGetImage(subsystem->display, subsystem->root_window, surface->x, surface->y,
@@ -1026,7 +1027,6 @@ static int x11_shadow_xfixes_init(x11ShadowSubsystem* subsystem)
 static int x11_shadow_xinerama_init(x11ShadowSubsystem* subsystem)
 {
 #ifdef WITH_XINERAMA
-	int major, minor;
 	int xinerama_event;
 	int xinerama_error;
 	x11_shadow_subsystem_base_init(subsystem);
@@ -1034,8 +1034,11 @@ static int x11_shadow_xinerama_init(x11ShadowSubsystem* subsystem)
 	if (!XineramaQueryExtension(subsystem->display, &xinerama_event, &xinerama_error))
 		return -1;
 
+#if defined(WITH_XDAMAGE)
+	int major, minor;
 	if (!XDamageQueryVersion(subsystem->display, &major, &minor))
 		return -1;
+#endif
 
 	if (!XineramaIsActive(subsystem->display))
 		return -1;
@@ -1148,9 +1151,11 @@ static int x11_shadow_xshm_init(x11ShadowSubsystem* subsystem)
 
 	values.subwindow_mode = IncludeInferiors;
 	values.graphics_exposures = False;
+#if defined(WITH_XDAMAGE)
 	subsystem->xshm_gc = XCreateGC(subsystem->display, subsystem->root_window,
 	                               GCSubwindowMode | GCGraphicsExposures, &values);
 	XSetFunction(subsystem->display, subsystem->xshm_gc, GXcopy);
+#endif
 	XSync(subsystem->display, False);
 	return 1;
 }
@@ -1177,13 +1182,22 @@ UINT32 x11_shadow_enum_monitors(MONITOR_DEF* monitors, UINT32 maxMonitors)
 	displayHeight = HeightOfScreen(DefaultScreenOfDisplay(display));
 #ifdef WITH_XINERAMA
 	{
+#if defined(WITH_XDAMAGE)
 		int major, minor;
+#endif
 		int xinerama_event;
 		int xinerama_error;
 		XineramaScreenInfo* screens;
 
-		if (XineramaQueryExtension(display, &xinerama_event, &xinerama_error) &&
-		    XDamageQueryVersion(display, &major, &minor) && XineramaIsActive(display))
+		const Bool xinerama = XineramaQueryExtension(display, &xinerama_event, &xinerama_error);
+		const Bool damage =
+#if defined(WITH_XDAMAGE)
+		    XDamageQueryVersion(display, &major, &minor);
+#else
+		    False;
+#endif
+
+		if (xinerama && damage && XineramaIsActive(display))
 		{
 			screens = XineramaQueryScreens(display, &numMonitors);
 
@@ -1237,7 +1251,7 @@ static int x11_shadow_subsystem_init(rdpShadowSubsystem* sub)
 	char** extensions;
 	XVisualInfo* vi;
 	XVisualInfo* vis;
-	XVisualInfo template;
+	XVisualInfo template = { 0 };
 	XPixmapFormatValues* pf;
 	XPixmapFormatValues* pfs;
 
@@ -1251,7 +1265,7 @@ static int x11_shadow_subsystem_init(rdpShadowSubsystem* sub)
 
 	if ((subsystem->depth != 24) && (subsystem->depth != 32))
 	{
-		WLog_ERR(TAG, "unsupported X11 server color depth: %d", subsystem->depth);
+		WLog_ERR(TAG, "unsupported X11 server color depth: %" PRIu32, subsystem->depth);
 		return -1;
 	}
 
@@ -1292,7 +1306,6 @@ static int x11_shadow_subsystem_init(rdpShadowSubsystem* sub)
 	}
 
 	XFree(pfs);
-	ZeroMemory(&template, sizeof(template));
 	template.class = TrueColor;
 	template.screen = subsystem->number;
 	vis = XGetVisualInfo(subsystem->display, VisualClassMask | VisualScreenMask, &template,
@@ -1320,7 +1333,7 @@ static int x11_shadow_subsystem_init(rdpShadowSubsystem* sub)
 	subsystem->cursorMaxWidth = 256;
 	subsystem->cursorMaxHeight = 256;
 	subsystem->cursorPixels =
-	    _aligned_malloc(subsystem->cursorMaxWidth * subsystem->cursorMaxHeight * 4, 16);
+	    winpr_aligned_malloc(subsystem->cursorMaxWidth * subsystem->cursorMaxHeight * 4, 16);
 
 	if (!subsystem->cursorPixels)
 		return -1;
@@ -1394,7 +1407,7 @@ static int x11_shadow_subsystem_uninit(rdpShadowSubsystem* sub)
 
 	if (subsystem->cursorPixels)
 	{
-		_aligned_free(subsystem->cursorPixels);
+		winpr_aligned_free(subsystem->cursorPixels);
 		subsystem->cursorPixels = NULL;
 	}
 

@@ -24,11 +24,23 @@ set(RDTK_VERSION_FULL "${RDTK_VERSION}")
 set(RDTK_API_VERSION "${RDTK_VERSION_MAJOR}")
 
 if (NOT FREERDP_UNIFIED_BUILD)
-	cmake_minimum_required(VERSION 3.4)
+	cmake_minimum_required(VERSION 3.13)
 	project(RdTk VERSION ${RDTK_VERSION} LANGUAGES C)
+
+	set(CMAKE_C_STANDARD 11)
+	set(CMAKE_C_STANDARD_REQUIRED ON)
+	set(CMAKE_C_EXTENSIONS ON)
+
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT supported OUTPUT error)
+    if (supported)
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
+    endif()
+
 
 	set(CMAKE_COLOR_MAKEFILE ON)
 
+	set(WINPR_VERSION_MAJOR 3)
 	option(BUILD_SHARED_LIBS "Build shared libraries" ON)
     option(EXPORT_ALL_SYMBOLS "Export all symbols form library" OFF)
 	option(BUILD_TESTING "Build library unit tests" ON)
@@ -45,6 +57,8 @@ if (NOT FREERDP_UNIFIED_BUILD)
             set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fvisibility=hidden")
         endif()
     endif()
+else()
+	set(WINPR_VERSION_MAJOR ${FREERDP_VERSION_MAJOR})
 endif()
 
 # Include our extra modules
@@ -65,17 +79,13 @@ include(GNUInstallDirsWrapper)
 include(CMakePackageConfigHelpers)
 include (SetFreeRDPCMakeInstallDir)
 
-if(BUILD_SHARED_LIBS)
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DRDTK_EXPORTS")
-endif()
+add_definitions(-DRDTK_EXPORTS)
 
 if (NOT IOS)
-	check_include_files(stdbool.h WINPR_HAVE_STDBOOL_H)
-	if (NOT WINPR_HAVE_STDBOOL_H)
+    check_include_files(stdbool.h RDTK_HAVE_STDBOOL_H)
+    if (NOT RDTK_HAVE_STDBOOL_H)
 		include_directories(BEFORE ${CMAKE_CURRENT_SOURCE_DIR}/../compat/stdbool)
 	endif()
-else()
-	set(WINPR_HAVE_STDBOOL_H 1)
 endif()
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -91,11 +101,11 @@ endif()
 
 SetFreeRDPCMakeInstallDir(RDTK_CMAKE_INSTALL_DIR "rdtk${RDTK_VERSION_MAJOR}")
 
-include_directories(BEFORE ${CMAKE_CURRENT_BINARY_DIR}/templates)
+set(RDTK_INCLUDE_DIR include/rdtk${RDTK_API_VERSION})
 
 add_subdirectory(librdtk)
-add_subdirectory(include)
 add_subdirectory(templates)
+add_subdirectory(include)
 
 install(EXPORT rdtk DESTINATION ${RDTK_CMAKE_INSTALL_DIR})
 

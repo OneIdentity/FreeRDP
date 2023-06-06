@@ -17,9 +17,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,6 +30,8 @@
 
 #include <libavcodec/avcodec.h>
 #include <libavutil/common.h>
+#include <libavutil/cpu.h>
+#include <libavutil/imgutils.h>
 
 #include "tsmf_constants.h"
 #include "tsmf_decoder.h"
@@ -70,7 +70,7 @@
 #define AV_PIX_FMT_YUV420P PIX_FMT_YUV420P
 #endif
 
-typedef struct _TSMFFFmpegDecoder
+typedef struct
 {
 	ITSMFDecoder iface;
 
@@ -195,9 +195,13 @@ static BOOL tsmf_ffmpeg_init_stream(ITSMFDecoder* decoder, const TS_AM_MEDIA_TYP
 		if (media_type->SubType == TSMF_SUB_TYPE_AVC1 &&
 		    media_type->FormatType == TSMF_FORMAT_TYPE_MPEG2VIDEOINFO)
 		{
+			size_t required = 6;
 			/* The extradata format that FFmpeg uses is following CodecPrivate in Matroska.
 			   See http://haali.su/mkv/codecs.pdf */
 			p = mdecoder->codec_context->extradata;
+			if ((mdecoder->codec_context->extradata_size < 0) ||
+			    ((size_t)mdecoder->codec_context->extradata_size < required))
+				return FALSE;
 			*p++ = 1;                         /* Reserved? */
 			*p++ = media_type->ExtraData[8];  /* Profile */
 			*p++ = 0;                         /* Profile */
@@ -206,23 +210,41 @@ static BOOL tsmf_ffmpeg_init_stream(ITSMFDecoder* decoder, const TS_AM_MEDIA_TYP
 			*p++ = 0xe0 | 0x01;               /* Reserved | #sps */
 			s = media_type->ExtraData + 20;
 			size = ((UINT32)(*s)) * 256 + ((UINT32)(*(s + 1)));
+			required += size + 2;
+			if ((mdecoder->codec_context->extradata_size < 0) ||
+			    ((size_t)mdecoder->codec_context->extradata_size < required))
+				return FALSE;
 			memcpy(p, s, size + 2);
 			s += size + 2;
 			p += size + 2;
+			required++;
+			if ((mdecoder->codec_context->extradata_size < 0) ||
+			    ((size_t)mdecoder->codec_context->extradata_size < required))
+				return FALSE;
 			*p++ = 1; /* #pps */
 			size = ((UINT32)(*s)) * 256 + ((UINT32)(*(s + 1)));
+			required += size + 2;
+			if ((mdecoder->codec_context->extradata_size < 0) ||
+			    ((size_t)mdecoder->codec_context->extradata_size < required))
+				return FALSE;
 			memcpy(p, s, size + 2);
 		}
 		else
 		{
 			memcpy(mdecoder->codec_context->extradata, media_type->ExtraData,
 			       media_type->ExtraDataSize);
+			if ((mdecoder->codec_context->extradata_size < 0) ||
+			    ((size_t)mdecoder->codec_context->extradata_size <
+			     media_type->ExtraDataSize + 8ull))
+				return FALSE;
 			memset(mdecoder->codec_context->extradata + media_type->ExtraDataSize, 0, 8);
 		}
 	}
 
+#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(59, 18, 100)
 	if (mdecoder->codec->capabilities & AV_CODEC_CAP_TRUNCATED)
 		mdecoder->codec_context->flags |= AV_CODEC_FLAG_TRUNCATED;
+#endif
 
 	return TRUE;
 }
@@ -244,6 +266,9 @@ static BOOL tsmf_ffmpeg_prepare(ITSMFDecoder* decoder)
 static BOOL tsmf_ffmpeg_set_format(ITSMFDecoder* decoder, TS_AM_MEDIA_TYPE* media_type)
 {
 	TSMFFFmpegDecoder* mdecoder = (TSMFFFmpegDecoder*)decoder;
+
+	WINPR_ASSERT(mdecoder);
+	WINPR_ASSERT(media_type);
 
 	switch (media_type->MajorType)
 	{
@@ -297,6 +322,9 @@ static BOOL tsmf_ffmpeg_set_format(ITSMFDecoder* decoder, TS_AM_MEDIA_TYPE* medi
 			   http://msdn.microsoft.com/en-us/library/dd757806.aspx */
 			if (media_type->ExtraData)
 			{
+				if (media_type->ExtraDataSize < 12)
+					return FALSE;
+
 				media_type->ExtraData += 12;
 				media_type->ExtraDataSize -= 12;
 			}
@@ -371,9 +399,9 @@ static BOOL tsmf_ffmpeg_decode_video(ITSMFDecoder* decoder, const BYTE* data, UI
 		           mdecoder->frame->linesize[2], mdecoder->frame->linesize[3],
 		           mdecoder->codec_context->pix_fmt, mdecoder->codec_context->width,
 		           mdecoder->codec_context->height);
-		mdecoder->decoded_size =
-		    avpicture_get_size(mdecoder->codec_context->pix_fmt, mdecoder->codec_context->width,
-		                       mdecoder->codec_context->height);
+		mdecoder->decoded_size = av_image_get_buffer_size(mdecoder->codec_context->pix_fmt,
+		                                                  mdecoder->codec_context->width,
+		                                                  mdecoder->codec_context->height, 1);
 		mdecoder->decoded_data = calloc(1, mdecoder->decoded_size);
 
 		if (!mdecoder->decoded_data)
@@ -384,11 +412,12 @@ static BOOL tsmf_ffmpeg_decode_video(ITSMFDecoder* decoder, const BYTE* data, UI
 #else
 		frame = av_frame_alloc();
 #endif
-		avpicture_fill((AVPicture*)frame, mdecoder->decoded_data, mdecoder->codec_context->pix_fmt,
-		               mdecoder->codec_context->width, mdecoder->codec_context->height);
-		av_picture_copy((AVPicture*)frame, (AVPicture*)mdecoder->frame,
-		                mdecoder->codec_context->pix_fmt, mdecoder->codec_context->width,
-		                mdecoder->codec_context->height);
+		av_image_fill_arrays(frame->data, frame->linesize, mdecoder->decoded_data,
+		                     mdecoder->codec_context->pix_fmt, mdecoder->codec_context->width,
+		                     mdecoder->codec_context->height, 1);
+		av_image_copy(frame->data, frame->linesize, (const uint8_t**)mdecoder->frame->data,
+		              mdecoder->frame->linesize, mdecoder->codec_context->pix_fmt,
+		              mdecoder->codec_context->width, mdecoder->codec_context->height);
 		av_free(frame);
 	}
 
@@ -615,17 +644,13 @@ static void tsmf_ffmpeg_free(ITSMFDecoder* decoder)
 static INIT_ONCE g_Initialized = INIT_ONCE_STATIC_INIT;
 static BOOL CALLBACK InitializeAvCodecs(PINIT_ONCE once, PVOID param, PVOID* context)
 {
+#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(58, 10, 100)
 	avcodec_register_all();
+#endif
 	return TRUE;
 }
 
-#ifdef BUILTIN_CHANNELS
-#define freerdp_tsmf_client_subsystem_entry ffmpeg_freerdp_tsmf_client_decoder_subsystem_entry
-#else
-#define freerdp_tsmf_client_subsystem_entry FREERDP_API freerdp_tsmf_client_decoder_subsystem_entry
-#endif
-
-ITSMFDecoder* freerdp_tsmf_client_subsystem_entry(void)
+ITSMFDecoder* ffmpeg_freerdp_tsmf_client_decoder_subsystem_entry(void)
 {
 	TSMFFFmpegDecoder* decoder;
 	InitOnceExecuteOnce(&g_Initialized, InitializeAvCodecs, NULL, NULL);

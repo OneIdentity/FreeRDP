@@ -18,9 +18,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <winpr/crt.h>
 #include <winpr/synch.h>
@@ -59,19 +57,15 @@ int main(int argc, char* argv[])
 	status = freerdp_client_settings_parse_command_line(context->settings, argc, argv, FALSE);
 	if (status)
 	{
-		BOOL list;
-
 		rc = freerdp_client_settings_command_line_status_print(settings, status, argc, argv);
 
-		list = settings->ListMonitors;
-
-		if (list)
+		if (settings->ListMonitors)
 			xf_list_monitors(xfc);
 
 		goto out;
 	}
 
-	if (!stream_dump_register_handlers(context, CONNECTION_STATE_MCS_CONNECT))
+	if (!stream_dump_register_handlers(context, CONNECTION_STATE_MCS_CREATE_REQUEST, FALSE))
 		goto out;
 
 	if (freerdp_client_start(context) != 0)

@@ -17,9 +17,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -30,11 +28,15 @@
 #include <freerdp/locale/keyboard.h>
 #include <freerdp/locale/locale.h>
 
+#include <freerdp/log.h>
+
 #include "liblocale.h"
 
 #if defined(__MACOSX__)
 #include "keyboard_apple.h"
 #endif
+
+#define TAG FREERDP_TAG("locale.keyboard")
 
 #ifdef WITH_X11
 
@@ -258,15 +260,16 @@ static int freerdp_keyboard_init_apple(DWORD* keyboardLayoutId,
 {
 	DWORD vkcode;
 	DWORD keycode;
-	DWORD keycode_to_vkcode[256];
+	DWORD keycode_to_vkcode[256] = { 0 };
 
-	ZeroMemory(keycode_to_vkcode, sizeof(keycode_to_vkcode));
-
+	WINPR_ASSERT(x11_keycode_to_rdp_scancode);
+	WINPR_ASSERT(keyboardLayoutId);
 	for (keycode = 0; keycode < 256; keycode++)
 	{
 		vkcode = keycode_to_vkcode[keycode] =
-		    GetVirtualKeyCodeFromKeycode(keycode, KEYCODE_TYPE_APPLE);
-		x11_keycode_to_rdp_scancode[keycode] = GetVirtualScanCodeFromVirtualKeyCode(vkcode, 4);
+		    GetVirtualKeyCodeFromKeycode(keycode, WINPR_KEYCODE_TYPE_APPLE);
+		x11_keycode_to_rdp_scancode[keycode] =
+		    GetVirtualScanCodeFromVirtualKeyCode(vkcode, WINPR_KBD_TYPE_IBM_ENHANCED);
 	}
 
 	return 0;
@@ -277,15 +280,16 @@ static int freerdp_keyboard_init_x11_evdev(DWORD* keyboardLayoutId,
 {
 	DWORD vkcode;
 	DWORD keycode;
-	DWORD keycode_to_vkcode[256];
+	DWORD keycode_to_vkcode[256] = { 0 };
 
-	ZeroMemory(keycode_to_vkcode, sizeof(keycode_to_vkcode));
-
+	WINPR_ASSERT(keyboardLayoutId);
+	WINPR_ASSERT(x11_keycode_to_rdp_scancode);
 	for (keycode = 0; keycode < 256; keycode++)
 	{
 		vkcode = keycode_to_vkcode[keycode] =
-		    GetVirtualKeyCodeFromKeycode(keycode, KEYCODE_TYPE_EVDEV);
-		x11_keycode_to_rdp_scancode[keycode] = GetVirtualScanCodeFromVirtualKeyCode(vkcode, 4);
+		    GetVirtualKeyCodeFromKeycode(keycode, WINPR_KEYCODE_TYPE_XKB);
+		x11_keycode_to_rdp_scancode[keycode] =
+		    GetVirtualScanCodeFromVirtualKeyCode(vkcode, WINPR_KBD_TYPE_IBM_ENHANCED);
 	}
 
 	return 0;
@@ -294,9 +298,7 @@ static int freerdp_keyboard_init_x11_evdev(DWORD* keyboardLayoutId,
 DWORD freerdp_keyboard_init(DWORD keyboardLayoutId)
 {
 	DWORD keycode;
-#if defined(__APPLE__) || defined(WITH_X11) || defined(WITH_WAYLAND)
 	int status = -1;
-#endif
 
 #ifdef __APPLE__
 	if (status < 0)
@@ -315,6 +317,9 @@ DWORD freerdp_keyboard_init(DWORD keyboardLayoutId)
 		    freerdp_keyboard_init_x11_evdev(&keyboardLayoutId, X11_KEYCODE_TO_VIRTUAL_SCANCODE);
 
 #endif
+
+	if (status < 0)
+		WLog_DBG(TAG, "Platform keyboard detection failed, trying autodetection");
 
 	freerdp_detect_keyboard(&keyboardLayoutId);
 

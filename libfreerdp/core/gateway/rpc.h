@@ -30,6 +30,8 @@
 #include <freerdp/log.h>
 #include <freerdp/utils/ringbuffer.h>
 
+#include "../../crypto/tls.h"
+
 typedef struct rdp_rpc rdpRpc;
 
 #pragma pack(push, 1)
@@ -60,7 +62,7 @@ typedef struct
 
 #define RPC_PDU_FLAG_STUB 0x00000001
 
-typedef struct _RPC_PDU
+typedef struct
 {
 	wStream* s;
 	UINT32 Type;
@@ -74,7 +76,7 @@ typedef struct _RPC_PDU
 #include "../transport.h"
 
 #include "http.h"
-#include "ntlm.h"
+#include "../credssp_auth.h"
 
 #include <time.h>
 
@@ -83,7 +85,6 @@ typedef struct _RPC_PDU
 
 #include <freerdp/types.h>
 #include <freerdp/settings.h>
-#include <freerdp/crypto/tls.h>
 #include <freerdp/crypto/crypto.h>
 #include <freerdp/api.h>
 
@@ -398,13 +399,12 @@ typedef struct
 
 /* fault codes */
 
-struct _RPC_FAULT_CODE
+typedef struct
 {
 	UINT32 code;
 	const char* name;
 	const char* category;
-};
-typedef struct _RPC_FAULT_CODE RPC_FAULT_CODE;
+} RPC_FAULT_CODE;
 
 #define DEFINE_RPC_FAULT_CODE(_code, cat) \
 	{                                     \
@@ -544,15 +544,14 @@ typedef union
 
 #pragma pack(pop)
 
-struct _RPC_SECURITY_PROVIDER_INFO
+typedef struct
 {
 	UINT32 Id;
 	LONG EvenLegs;
 	LONG NumLegs;
-};
-typedef struct _RPC_SECURITY_PROVIDER_INFO RPC_SECURITY_PROVIDER_INFO;
+} RPC_SECURITY_PROVIDER_INFO;
 
-enum _RPC_CLIENT_STATE
+typedef enum
 {
 	RPC_CLIENT_STATE_INITIAL,
 	RPC_CLIENT_STATE_ESTABLISHED,
@@ -562,10 +561,9 @@ enum _RPC_CLIENT_STATE
 	RPC_CLIENT_STATE_CONTEXT_NEGOTIATED,
 	RPC_CLIENT_STATE_WAIT_RESPONSE,
 	RPC_CLIENT_STATE_FINAL
-};
-typedef enum _RPC_CLIENT_STATE RPC_CLIENT_STATE;
+} RPC_CLIENT_STATE;
 
-enum _RPC_CLIENT_CALL_STATE
+typedef enum
 {
 	RPC_CLIENT_CALL_STATE_INITIAL,
 	RPC_CLIENT_CALL_STATE_SEND_PDUS,
@@ -574,18 +572,16 @@ enum _RPC_CLIENT_CALL_STATE
 	RPC_CLIENT_CALL_STATE_COMPLETE,
 	RPC_CLIENT_CALL_STATE_FAULT,
 	RPC_CLIENT_CALL_STATE_FINAL
-};
-typedef enum _RPC_CLIENT_CALL_STATE RPC_CLIENT_CALL_STATE;
+} RPC_CLIENT_CALL_STATE;
 
-struct rpc_client_call
+typedef struct
 {
 	UINT32 CallId;
 	UINT32 OpNum;
 	RPC_CLIENT_CALL_STATE State;
-};
-typedef struct rpc_client_call RpcClientCall;
+} RpcClientCall;
 
-struct rpc_client
+typedef struct
 {
 	rdpContext* context;
 	RPC_PDU* pdu;
@@ -597,33 +593,30 @@ struct rpc_client
 	char* host;
 	UINT16 port;
 	BOOL isProxy;
-};
-typedef struct rpc_client RpcClient;
+} RpcClient;
 
-struct rpc_channel
+typedef struct
 {
 	RpcClient* client;
 	BIO* bio;
 	rdpTls* tls;
-	rdpNtlm* ntlm;
+	rdpCredsspAuth* auth;
 	HttpContext* http;
 	BYTE Cookie[16];
-};
-typedef struct rpc_channel RpcChannel;
+} RpcChannel;
 
 /* Ping Originator */
 
-struct rpc_ping_originator
+typedef struct
 {
 	UINT32 ConnectionTimeout;
 	UINT32 LastPacketSentTimestamp;
 	UINT32 KeepAliveInterval;
-};
-typedef struct rpc_ping_originator RpcPingOriginator;
+} RpcPingOriginator;
 
 /* Client In Channel */
 
-enum _CLIENT_IN_CHANNEL_STATE
+typedef enum
 {
 	CLIENT_IN_CHANNEL_STATE_INITIAL,
 	CLIENT_IN_CHANNEL_STATE_CONNECTED,
@@ -632,10 +625,9 @@ enum _CLIENT_IN_CHANNEL_STATE
 	CLIENT_IN_CHANNEL_STATE_OPENED,
 	CLIENT_IN_CHANNEL_STATE_OPENED_A4W,
 	CLIENT_IN_CHANNEL_STATE_FINAL
-};
-typedef enum _CLIENT_IN_CHANNEL_STATE CLIENT_IN_CHANNEL_STATE;
+} CLIENT_IN_CHANNEL_STATE;
 
-struct rpc_in_channel
+typedef struct
 {
 	/* Sending Channel */
 
@@ -652,12 +644,11 @@ struct rpc_in_channel
 	/* Ping Originator */
 
 	RpcPingOriginator PingOriginator;
-};
-typedef struct rpc_in_channel RpcInChannel;
+} RpcInChannel;
 
 /* Client Out Channel */
 
-enum _CLIENT_OUT_CHANNEL_STATE
+typedef enum
 {
 	CLIENT_OUT_CHANNEL_STATE_INITIAL,
 	CLIENT_OUT_CHANNEL_STATE_CONNECTED,
@@ -669,10 +660,9 @@ enum _CLIENT_OUT_CHANNEL_STATE
 	CLIENT_OUT_CHANNEL_STATE_OPENED_B3W,
 	CLIENT_OUT_CHANNEL_STATE_RECYCLED,
 	CLIENT_OUT_CHANNEL_STATE_FINAL
-};
-typedef enum _CLIENT_OUT_CHANNEL_STATE CLIENT_OUT_CHANNEL_STATE;
+} CLIENT_OUT_CHANNEL_STATE;
 
-struct rpc_out_channel
+typedef struct
 {
 	/* Receiving Channel */
 
@@ -685,12 +675,11 @@ struct rpc_out_channel
 	UINT32 ReceiverAvailableWindow;
 	UINT32 BytesReceived;
 	UINT32 AvailableWindowAdvertised;
-};
-typedef struct rpc_out_channel RpcOutChannel;
+} RpcOutChannel;
 
 /* Client Virtual Connection */
 
-enum _VIRTUAL_CONNECTION_STATE
+typedef enum
 {
 	VIRTUAL_CONNECTION_STATE_INITIAL,
 	VIRTUAL_CONNECTION_STATE_OUT_CHANNEL_WAIT,
@@ -698,10 +687,9 @@ enum _VIRTUAL_CONNECTION_STATE
 	VIRTUAL_CONNECTION_STATE_WAIT_C2,
 	VIRTUAL_CONNECTION_STATE_OPENED,
 	VIRTUAL_CONNECTION_STATE_FINAL
-};
-typedef enum _VIRTUAL_CONNECTION_STATE VIRTUAL_CONNECTION_STATE;
+} VIRTUAL_CONNECTION_STATE;
 
-struct rpc_virtual_connection
+typedef struct
 {
 	BYTE Cookie[16];
 	BYTE AssociationGroupId[16];
@@ -710,8 +698,7 @@ struct rpc_virtual_connection
 	RpcInChannel* NonDefaultInChannel;
 	RpcOutChannel* DefaultOutChannel;
 	RpcOutChannel* NonDefaultOutChannel;
-};
-typedef struct rpc_virtual_connection RpcVirtualConnection;
+} RpcVirtualConnection;
 
 /* Virtual Connection Cookie Table */
 
@@ -722,13 +709,12 @@ typedef struct rpc_virtual_connection RpcVirtualConnection;
 	    _rpc_uuid[6], _rpc_uuid[7], _rpc_uuid[8], _rpc_uuid[9], _rpc_uuid[10], _rpc_uuid[11], \
 	    _rpc_uuid[12], _rpc_uuid[13], _rpc_uuid[14], _rpc_uuid[15]
 
-struct rpc_virtual_connection_cookie_entry
+typedef struct
 {
 	BYTE Cookie[16];
 	UINT32 ReferenceCount;
 	RpcVirtualConnection* Reference;
-};
-typedef struct rpc_virtual_connection_cookie_entry RpcVirtualConnectionCookieEntry;
+} RpcVirtualConnectionCookieEntry;
 
 struct rdp_rpc
 {
@@ -736,7 +722,7 @@ struct rdp_rpc
 
 	UINT32 result;
 
-	rdpNtlm* ntlm;
+	rdpCredsspAuth* auth;
 	size_t SendSeqNum;
 
 	RpcClient* client;

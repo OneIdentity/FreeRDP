@@ -17,9 +17,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -70,12 +68,12 @@ ITSMFDecoder* tsmf_load_decoder(const char* name, TS_AM_MEDIA_TYPE* media_type)
 		decoder = tsmf_load_decoder_by_name(name);
 	}
 
-#if defined(WITH_GSTREAMER_1_0) || defined(WITH_GSTREAMER_0_10)
+#if defined(WITH_GSTREAMER_1_0)
 	if (!decoder)
 		decoder = tsmf_load_decoder_by_name("gstreamer");
 #endif
 
-#if defined(WITH_FFMPEG)
+#if defined(WITH_VIDEO_FFMPEG)
 	if (!decoder)
 		decoder = tsmf_load_decoder_by_name("ffmpeg");
 #endif
@@ -101,12 +99,12 @@ BOOL tsmf_check_decoder_available(const char* name)
 	{
 		decoder = tsmf_load_decoder_by_name(name);
 	}
-#if defined(WITH_GSTREAMER_1_0) || defined(WITH_GSTREAMER_0_10)
+#if defined(WITH_GSTREAMER_1_0)
 	if (!decoder)
 		decoder = tsmf_load_decoder_by_name("gstreamer");
 #endif
 
-#if defined(WITH_FFMPEG)
+#if defined(WITH_VIDEO_FFMPEG)
 	if (!decoder)
 		decoder = tsmf_load_decoder_by_name("ffmpeg");
 #endif

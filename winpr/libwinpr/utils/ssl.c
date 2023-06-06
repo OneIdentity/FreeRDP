@@ -18,9 +18,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <winpr/config.h>
 
 #include <winpr/crt.h>
 #include <winpr/synch.h>
@@ -33,10 +31,20 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 
+#if defined(OPENSSL_VERSION_MAJOR) && (OPENSSL_VERSION_MAJOR >= 3)
+#include <openssl/provider.h>
+#endif
+
 #include "../log.h"
 #define TAG WINPR_TAG("utils.ssl")
 
 static BOOL g_winpr_openssl_initialized_by_winpr = FALSE;
+
+#if defined(OPENSSL_VERSION_MAJOR) && (OPENSSL_VERSION_MAJOR >= 3)
+static OSSL_PROVIDER* s_winpr_openssl_provider_fips = NULL;
+static OSSL_PROVIDER* s_winpr_openssl_provider_legacy = NULL;
+static OSSL_PROVIDER* s_winpr_openssl_provider_default = NULL;
+#endif
 
 /**
  * Note from OpenSSL 1.1.0 "CHANGES":
@@ -242,9 +250,14 @@ static BOOL winpr_enable_fips(DWORD flags)
 		WLog_ERR(TAG, "Openssl fips mode not available on openssl versions less than 1.0.1!");
 		return FALSE;
 #else
-		WLog_DBG(TAG, "Ensuring openssl fips mode is ENabled");
+		WLog_DBG(TAG, "Ensuring openssl fips mode is enabled");
 
 #if defined(OPENSSL_VERSION_MAJOR) && (OPENSSL_VERSION_MAJOR >= 3)
+		s_winpr_openssl_provider_fips = OSSL_PROVIDER_load(NULL, "fips");
+		if (s_winpr_openssl_provider_fips == NULL)
+		{
+			WLog_WARN(TAG, "OpenSSL FIPS provider failled to load");
+		}
 		if (!EVP_default_properties_is_fips_enabled(NULL))
 #else
 		if (FIPS_mode() != 1)
@@ -255,10 +268,10 @@ static BOOL winpr_enable_fips(DWORD flags)
 #else
 			if (FIPS_mode_set(1))
 #endif
-				WLog_INFO(TAG, "Openssl fips mode ENabled!");
+				WLog_INFO(TAG, "Openssl fips mode enabled!");
 			else
 			{
-				WLog_ERR(TAG, "Openssl fips mode ENable failed!");
+				WLog_ERR(TAG, "Openssl fips mode enable failed!");
 				return FALSE;
 			}
 		}
@@ -269,7 +282,12 @@ static BOOL winpr_enable_fips(DWORD flags)
 	return TRUE;
 }
 
-static BOOL CALLBACK _winpr_openssl_initialize(PINIT_ONCE once, PVOID param, PVOID* context)
+static void winpr_openssl_cleanup(void)
+{
+	winpr_CleanupSSL(WINPR_SSL_INIT_DEFAULT);
+}
+
+static BOOL CALLBACK winpr_openssl_initialize(PINIT_ONCE once, PVOID param, PVOID* context)
 {
 	DWORD flags = param ? *(PDWORD)param : WINPR_SSL_INIT_DEFAULT;
 
@@ -305,8 +323,24 @@ static BOOL CALLBACK _winpr_openssl_initialize(PINIT_ONCE once, PVOID param, PVO
 		return FALSE;
 
 #endif
+
+#if defined(OPENSSL_VERSION_MAJOR) && (OPENSSL_VERSION_MAJOR >= 3)
+	/* The legacy provider is needed for MD4. */
+	s_winpr_openssl_provider_legacy = OSSL_PROVIDER_load(NULL, "legacy");
+	if (s_winpr_openssl_provider_legacy == NULL)
+	{
+		WLog_WARN(TAG, "OpenSSL LEGACY provider failed to load, no md4 support available!");
+	}
+	s_winpr_openssl_provider_default = OSSL_PROVIDER_load(NULL, "default");
+	if (s_winpr_openssl_provider_default == NULL)
+	{
+		WLog_WARN(TAG, "OpenSSL DEFAULT provider failed to load");
+	}
+#endif
+
+	atexit(winpr_openssl_cleanup);
 	g_winpr_openssl_initialized_by_winpr = TRUE;
-	return winpr_enable_fips(flags);
+	return TRUE;
 }
 
 /* exported functions */
@@ -315,11 +349,29 @@ BOOL winpr_InitializeSSL(DWORD flags)
 {
 	static INIT_ONCE once = INIT_ONCE_STATIC_INIT;
 
-	if (!InitOnceExecuteOnce(&once, _winpr_openssl_initialize, &flags, NULL))
+	if (!InitOnceExecuteOnce(&once, winpr_openssl_initialize, &flags, NULL))
 		return FALSE;
 
 	return winpr_enable_fips(flags);
 }
+
+#if defined(OPENSSL_VERSION_MAJOR) && (OPENSSL_VERSION_MAJOR >= 3)
+static int unload(OSSL_PROVIDER* provider, void* data)
+{
+	if (!provider)
+		return 1;
+	const char* name = OSSL_PROVIDER_get0_name(provider);
+	if (!name)
+		return 1;
+
+	OSSL_LIB_CTX* ctx = OSSL_LIB_CTX_get0_global_default();
+	const int rc = OSSL_PROVIDER_available(ctx, name);
+	if (rc < 1)
+		return 1;
+	OSSL_PROVIDER_unload(provider);
+	return 1;
+}
+#endif
 
 BOOL winpr_CleanupSSL(DWORD flags)
 {
@@ -357,6 +409,11 @@ BOOL winpr_CleanupSSL(DWORD flags)
 	}
 
 #endif
+#if defined(OPENSSL_VERSION_MAJOR) && (OPENSSL_VERSION_MAJOR >= 3)
+	OSSL_LIB_CTX* ctx = OSSL_LIB_CTX_get0_global_default();
+	OSSL_PROVIDER_do_all(ctx, unload, NULL);
+#endif
+
 	return TRUE;
 }
 

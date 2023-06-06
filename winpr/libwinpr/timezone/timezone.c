@@ -17,9 +17,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <winpr/config.h>
 
 #include <winpr/environment.h>
 #include <winpr/wtypes.h>
@@ -66,7 +64,8 @@ static char* winpr_read_unix_timezone_identifier_from_file(FILE* fp)
 	do
 	{
 		rc = fread(tzid + read, 1, length - read - 1, fp);
-		read += rc;
+		if (rc > 0)
+			read += rc;
 
 		if (read < (length - 1))
 			break;
@@ -89,8 +88,11 @@ static char* winpr_read_unix_timezone_identifier_from_file(FILE* fp)
 	}
 
 	tzid[read] = '\0';
-	if (tzid[read - 1] == '\n')
-		tzid[read - 1] = '\0';
+	if (read > 0)
+	{
+		if (tzid[read - 1] == '\n')
+			tzid[read - 1] = '\0';
+	}
 
 	return tzid;
 }
@@ -152,7 +154,7 @@ static char* winpr_get_timezone_from_link(const char* links[], size_t count)
 				goto end;
 
 			strncpy(tzid, &buf[pos], alloc);
-			WLog_INFO(TAG, "winpr_get_timezone_from_link: tzid: %s", tzid);
+			WLog_DBG(TAG, "tzid: %s", tzid);
 			goto end;
 		}
 
@@ -166,14 +168,7 @@ static char* winpr_get_timezone_from_link(const char* links[], size_t count)
 }
 
 #if defined(ANDROID)
-#include <jni.h>
-static JavaVM* jniVm = NULL;
-
-JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved)
-{
-	jniVm = vm;
-	return JNI_VERSION_1_6;
-}
+#include "../utils/android.h"
 
 static char* winpr_get_android_timezone_identifier(void)
 {
@@ -264,7 +259,7 @@ static char* winpr_get_unix_timezone_identifier_from_file(void)
 	tzid = winpr_read_unix_timezone_identifier_from_file(fp);
 	fclose(fp);
 	if (tzid != NULL)
-		WLog_INFO(TAG, "winpr_get_unix_timezone_identifier_from_file: tzid: %s", tzid);
+		WLog_DBG(TAG, "tzid: %s", tzid);
 	return tzid;
 #endif
 }
@@ -382,8 +377,8 @@ winpr_get_current_time_zone_rule(const TIME_ZONE_RULE_ENTRY* rules, UINT32 count
 	{
 		if ((rules[i].TicksStart >= windows_time) && (windows_time >= rules[i].TicksEnd))
 		{
-			/*WLog_ERR(TAG,  "Got rule %d from table at %p with count %"PRIu32"", i, (void*) rules,
-			 * count);*/
+			/*WLog_ERR(TAG,  "Got rule %" PRIu32 " from table at %p with count %"PRIu32"", i,
+			 * (void*) rules, count);*/
 			return &rules[i];
 		}
 	}
@@ -406,7 +401,7 @@ DWORD GetTimeZoneInformation(LPTIME_ZONE_INFORMATION lpTimeZoneInformation)
 		goto out_error;
 
 	memset(tz, 0, sizeof(TIME_ZONE_INFORMATION));
-#ifdef HAVE_TM_GMTOFF
+#ifdef WINPR_HAVE_TM_GMTOFF
 	{
 		long bias = -(local_time->tm_gmtoff / 60L);
 
@@ -422,27 +417,23 @@ DWORD GetTimeZoneInformation(LPTIME_ZONE_INFORMATION lpTimeZoneInformation)
 
 	if (dtz != NULL)
 	{
-		int status;
+		const TIME_ZONE_INFORMATION empty = { 0 };
+
 		WLog_DBG(TAG, "tz: Bias=%" PRId32 " sn='%s' dln='%s'", dtz->Bias, dtz->StandardName,
 		         dtz->DaylightName);
-		tz->Bias = dtz->Bias;
-		tz->StandardBias = 0;
-		tz->DaylightBias = 0;
-		ZeroMemory(tz->StandardName, sizeof(tz->StandardName));
-		ZeroMemory(tz->DaylightName, sizeof(tz->DaylightName));
-		status = MultiByteToWideChar(CP_UTF8, 0, dtz->StandardName, -1, tz->StandardName,
-		                             sizeof(tz->StandardName) / sizeof(WCHAR) - 1);
 
-		if (status < 1)
+		*tz = empty;
+		tz->Bias = dtz->Bias;
+
+		if (ConvertUtf8ToWChar(dtz->StandardName, tz->StandardName, ARRAYSIZE(tz->StandardName)) <
+		    0)
 		{
 			WLog_ERR(TAG, "StandardName conversion failed - using default");
 			goto out_error;
 		}
 
-		status = MultiByteToWideChar(CP_UTF8, 0, dtz->DaylightName, -1, tz->DaylightName,
-		                             sizeof(tz->DaylightName) / sizeof(WCHAR) - 1);
-
-		if (status < 1)
+		if (ConvertUtf8ToWChar(dtz->DaylightName, tz->DaylightName, ARRAYSIZE(tz->DaylightName)) <
+		    0)
 		{
 			WLog_ERR(TAG, "DaylightName conversion failed - using default");
 			goto out_error;

@@ -27,14 +27,14 @@
  * Key Flags
  */
 
-#define KBDEXT (USHORT)0x0100
-#define KBDMULTIVK (USHORT)0x0200
-#define KBDSPECIAL (USHORT)0x0400
-#define KBDNUMPAD (USHORT)0x0800
-#define KBDUNICODE (USHORT)0x1000
-#define KBDINJECTEDVK (USHORT)0x2000
-#define KBDMAPPEDVK (USHORT)0x4000
-#define KBDBREAK (USHORT)0x8000
+#define KBDEXT 0x0100u
+#define KBDMULTIVK 0x0200u
+#define KBDSPECIAL 0x0400u
+#define KBDNUMPAD 0x0800u
+#define KBDUNICODE 0x1000u
+#define KBDINJECTEDVK 0x2000u
+#define KBDMAPPEDVK 0x4000u
+#define KBDBREAK 0x8000u
 
 /*
  * Virtual Key Codes (Windows):
@@ -866,6 +866,18 @@ extern "C"
 {
 #endif
 
+	/* [MS-RDPBCGR] 2.2.1.3.2 Client Core Data (TS_UD_CS_CORE) KeyboardType */
+	enum WINPR_KBD_TYPE
+	{
+		WINPR_KBD_TYPE_IBM_PC_XT = 0x00000001,    /* IBM PC/XT or compatible (83-key) keyboard */
+		WINPR_KBD_TYPE_OLIVETTI_ICO = 0x00000002, /* Olivetti "ICO" (102-key) keyboard */
+		WINPR_KBD_TYPE_IBM_PC_AT = 0x00000003,    /* IBM PC/AT (84-key) and similar keyboards */
+		WINPR_KBD_TYPE_IBM_ENHANCED = 0x00000004, /* IBM enhanced (101-key or 102-key) keyboard */
+		WINPR_KBD_TYPE_NOKIA_1050 = 0x00000005,   /* Nokia 1050 and similar keyboards */
+		WINPR_KBD_TYPE_NOKIA_9140 = 0x00000006,   /* Nokia 9140 and similar keyboards */
+		WINPR_KBD_TYPE_JAPANESE = 0x00000007      /* Japanese keyboard */
+	};
+
 	/**
 	 * Functions
 	 */
@@ -874,14 +886,20 @@ extern "C"
 	WINPR_API DWORD GetVirtualKeyCodeFromName(const char* vkname);
 	WINPR_API DWORD GetVirtualKeyCodeFromXkbKeyName(const char* xkbname);
 
-	WINPR_API DWORD GetVirtualKeyCodeFromVirtualScanCode(DWORD scancode, DWORD dwKeyboardType);
-	WINPR_API DWORD GetVirtualScanCodeFromVirtualKeyCode(DWORD vkcode, DWORD dwKeyboardType);
+	WINPR_API DWORD GetVirtualKeyCodeFromVirtualScanCode(DWORD scancode,
+	                                                     DWORD /* WINPR_KBD_TYPE */ dwKeyboardType);
+	WINPR_API DWORD GetVirtualScanCodeFromVirtualKeyCode(DWORD vkcode,
+	                                                     DWORD /* WINPR_KBD_TYPE */ dwKeyboardType);
 
-#define KEYCODE_TYPE_APPLE 0x00000001
-#define KEYCODE_TYPE_EVDEV 0x00000002
+	typedef enum
+	{
+		WINPR_KEYCODE_TYPE_APPLE = 0x00000001,
+		WINPR_KEYCODE_TYPE_EVDEV = 0x00000002,
+		WINPR_KEYCODE_TYPE_XKB = 0x00000003
+	} WINPR_KEYCODE_TYPE;
 
-	WINPR_API DWORD GetVirtualKeyCodeFromKeycode(DWORD keycode, DWORD dwFlags);
-	WINPR_API DWORD GetKeycodeFromVirtualKeyCode(DWORD keycode, DWORD dwFlags);
+	WINPR_API DWORD GetVirtualKeyCodeFromKeycode(DWORD keycode, WINPR_KEYCODE_TYPE type);
+	WINPR_API DWORD GetKeycodeFromVirtualKeyCode(DWORD keycode, WINPR_KEYCODE_TYPE type);
 
 #ifdef __cplusplus
 }

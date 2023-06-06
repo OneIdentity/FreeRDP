@@ -17,21 +17,46 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <string.h>
 #include <errno.h>
+#include <limits.h>
+#include <float.h>
 
 #include <freerdp/client.h>
 
+#include <freerdp/freerdp.h>
 #include <freerdp/addin.h>
 #include <freerdp/assistance.h>
 #include <freerdp/client/file.h>
 #include <freerdp/utils/passphrase.h>
 #include <freerdp/client/cmdline.h>
 #include <freerdp/client/channels.h>
+#include <freerdp/utils/smartcardlogon.h>
+
+#if defined(CHANNEL_AINPUT_CLIENT)
+#include <freerdp/client/ainput.h>
+#include <freerdp/channels/ainput.h>
+#endif
+
+#if defined(CHANNEL_VIDEO_CLIENT)
+#include <freerdp/client/video.h>
+#include <freerdp/channels/video.h>
+#include <freerdp/gdi/video.h>
+#endif
+
+#if defined(CHANNEL_RDPGFX_CLIENT)
+#include <freerdp/client/rdpgfx.h>
+#include <freerdp/channels/rdpgfx.h>
+#include <freerdp/gdi/gfx.h>
+#endif
+
+#if defined(CHANNEL_GEOMETRY_CLIENT)
+#include <freerdp/client/geometry.h>
+#include <freerdp/channels/geometry.h>
+#include <freerdp/gdi/video.h>
+#endif
 
 #include <freerdp/log.h>
 #define TAG CLIENT_TAG("common")
@@ -42,6 +67,14 @@ static BOOL freerdp_client_common_new(freerdp* instance, rdpContext* context)
 
 	WINPR_ASSERT(instance);
 	WINPR_ASSERT(context);
+
+	instance->LoadChannels = freerdp_client_load_channels;
+	instance->AuthenticateEx = client_cli_authenticate_ex;
+	instance->ChooseSmartcard = client_cli_choose_smartcard;
+	instance->VerifyCertificateEx = client_cli_verify_certificate_ex;
+	instance->VerifyChangedCertificateEx = client_cli_verify_changed_certificate_ex;
+	instance->PresentGatewayMessage = client_cli_present_gateway_message;
+	instance->LogonErrorInfo = client_cli_logon_error_info;
 
 	pEntryPoints = instance->pClientEntryPoints;
 	WINPR_ASSERT(pEntryPoints);
@@ -62,7 +95,7 @@ static void freerdp_client_common_free(freerdp* instance, rdpContext* context)
 
 /* Common API */
 
-rdpContext* freerdp_client_context_new(RDP_CLIENT_ENTRY_POINTS* pEntryPoints)
+rdpContext* freerdp_client_context_new(const RDP_CLIENT_ENTRY_POINTS* pEntryPoints)
 {
 	freerdp* instance;
 	rdpContext* context;
@@ -76,7 +109,6 @@ rdpContext* freerdp_client_context_new(RDP_CLIENT_ENTRY_POINTS* pEntryPoints)
 	if (!instance)
 		return NULL;
 
-	instance->settings = pEntryPoints->settings;
 	instance->ContextSize = pEntryPoints->ContextSize;
 	instance->ContextNew = freerdp_client_common_new;
 	instance->ContextFree = freerdp_client_common_free;
@@ -87,16 +119,17 @@ rdpContext* freerdp_client_context_new(RDP_CLIENT_ENTRY_POINTS* pEntryPoints)
 
 	CopyMemory(instance->pClientEntryPoints, pEntryPoints, pEntryPoints->Size);
 
-	if (!freerdp_context_new(instance))
+	if (!freerdp_context_new_ex(instance, pEntryPoints->settings))
 		goto out_fail2;
 
 	context = instance->context;
 	context->instance = instance;
-	context->settings = instance->settings;
 
+#if defined(WITH_CHANNELS)
 	if (freerdp_register_addin_provider(freerdp_channels_load_static_addin_entry, 0) !=
 	    CHANNEL_RC_OK)
 		goto out_fail2;
+#endif
 
 	return context;
 out_fail2:
@@ -176,28 +209,22 @@ static BOOL freerdp_client_settings_post_process(rdpSettings* settings)
 		{
 			if (settings->Username)
 			{
-				free(settings->GatewayUsername);
-				settings->GatewayUsername = _strdup(settings->Username);
-
-				if (!settings->GatewayUsername)
+				if (!freerdp_settings_set_string(settings, FreeRDP_GatewayUsername,
+				                                 settings->Username))
 					goto out_error;
 			}
 
 			if (settings->Domain)
 			{
-				free(settings->GatewayDomain);
-				settings->GatewayDomain = _strdup(settings->Domain);
-
-				if (!settings->GatewayDomain)
+				if (!freerdp_settings_set_string(settings, FreeRDP_GatewayDomain, settings->Domain))
 					goto out_error;
 			}
 
-			if (settings->Password)
+			if (freerdp_settings_get_string(settings, FreeRDP_Password))
 			{
-				free(settings->GatewayPassword);
-				settings->GatewayPassword = _strdup(settings->Password);
-
-				if (!settings->GatewayPassword)
+				if (!freerdp_settings_set_string(
+				        settings, FreeRDP_GatewayPassword,
+				        freerdp_settings_get_string(settings, FreeRDP_Password)))
 					goto out_error;
 			}
 		}
@@ -213,6 +240,15 @@ static BOOL freerdp_client_settings_post_process(rdpSettings* settings)
 	else if (settings->UseMultimon)
 	{
 		settings->Fullscreen = TRUE;
+	}
+
+	/* deal with the smartcard / smartcard logon stuff */
+	if (settings->SmartcardLogon)
+	{
+		settings->TlsSecurity = TRUE;
+		settings->RedirectSmartCards = TRUE;
+		settings->DeviceRedirection = TRUE;
+		freerdp_settings_set_bool(settings, FreeRDP_PasswordIsSmartcardPin, TRUE);
 	}
 
 	return TRUE;
@@ -369,15 +405,25 @@ static BOOL client_cli_authenticate_raw(freerdp* instance, rdp_auth_reason reaso
                                         char** password, char** domain)
 {
 	static const size_t password_size = 512;
-	const char* auth[] = { "Username: ", "Domain:   ", "Password: " };
+	const char* auth[] = { "Username:        ", "Domain:          ", "Password:        " };
+	const char* authPin[] = { "Username:        ", "Domain:          ", "Smartcard-Pin:   " };
 	const char* gw[] = { "GatewayUsername: ", "GatewayDomain:   ", "GatewayPassword: " };
 	const char** prompt;
+	BOOL pinOnly = FALSE;
+
+	WINPR_ASSERT(instance);
+	WINPR_ASSERT(instance->context);
+	WINPR_ASSERT(instance->context->settings);
 
 	switch (reason)
 	{
-		case AUTH_NLA:
+		case AUTH_SMARTCARD_PIN:
+			prompt = authPin;
+			pinOnly = TRUE;
+			break;
 		case AUTH_TLS:
 		case AUTH_RDP:
+		case AUTH_NLA:
 			prompt = auth;
 			break;
 		case GW_AUTH_HTTP:
@@ -392,14 +438,16 @@ static BOOL client_cli_authenticate_raw(freerdp* instance, rdp_auth_reason reaso
 	if (!username || !password || !domain)
 		return FALSE;
 
-	if (!*username)
+	if (!*username && !pinOnly)
 	{
 		size_t username_size = 0;
 		printf("%s", prompt[0]);
+		fflush(stdout);
 
-		if (GetLine(username, &username_size, stdin) < 0)
+		if (freerdp_interruptible_get_line(instance->context, username, &username_size, stdin) < 0)
 		{
-			WLog_ERR(TAG, "GetLine returned %s [%d]", strerror(errno), errno);
+			WLog_ERR(TAG, "freerdp_interruptible_get_line returned %s [%d]", strerror(errno),
+			         errno);
 			goto fail;
 		}
 
@@ -410,14 +458,16 @@ static BOOL client_cli_authenticate_raw(freerdp* instance, rdp_auth_reason reaso
 		}
 	}
 
-	if (!*domain)
+	if (!*domain && !pinOnly)
 	{
 		size_t domain_size = 0;
 		printf("%s", prompt[1]);
+		fflush(stdout);
 
-		if (GetLine(domain, &domain_size, stdin) < 0)
+		if (freerdp_interruptible_get_line(instance->context, domain, &domain_size, stdin) < 0)
 		{
-			WLog_ERR(TAG, "GetLine returned %s [%d]", strerror(errno), errno);
+			WLog_ERR(TAG, "freerdp_interruptible_get_line returned %s [%d]", strerror(errno),
+			         errno);
 			goto fail;
 		}
 
@@ -435,8 +485,8 @@ static BOOL client_cli_authenticate_raw(freerdp* instance, rdp_auth_reason reaso
 		if (!*password)
 			goto fail;
 
-		if (freerdp_passphrase_read(prompt[2], *password, password_size,
-		                            instance->settings->CredentialsFromStdin) == NULL)
+		if (freerdp_passphrase_read(instance->context, prompt[2], *password, password_size,
+		                            instance->context->settings->CredentialsFromStdin) == NULL)
 			goto fail;
 	}
 
@@ -459,21 +509,14 @@ BOOL client_cli_authenticate_ex(freerdp* instance, char** username, char** passw
 	WINPR_ASSERT(password);
 	WINPR_ASSERT(domain);
 
-	if (instance->settings->SmartcardLogon)
-	{
-		WLog_INFO(TAG, "Authentication via smartcard");
-		return TRUE;
-	}
-
 	switch (reason)
 	{
 		case AUTH_NLA:
 			break;
+
 		case AUTH_TLS:
-			if ((*username) && (*password))
-				return TRUE;
-			break;
 		case AUTH_RDP:
+		case AUTH_SMARTCARD_PIN: /* in this case password is pin code */
 			if ((*username) && (*password))
 				return TRUE;
 			break;
@@ -486,6 +529,50 @@ BOOL client_cli_authenticate_ex(freerdp* instance, char** username, char** passw
 	}
 
 	return client_cli_authenticate_raw(instance, reason, username, password, domain);
+}
+
+BOOL client_cli_choose_smartcard(freerdp* instance, SmartcardCertInfo** cert_list, DWORD count,
+                                 DWORD* choice, BOOL gateway)
+{
+	unsigned long answer;
+	char* p = NULL;
+
+	printf("Multiple smartcards are available for use:\n");
+	for (DWORD i = 0; i < count; i++)
+	{
+		const SmartcardCertInfo* cert = cert_list[i];
+		char* reader = ConvertWCharToUtf8Alloc(cert->reader, NULL);
+		char* container_name = ConvertWCharToUtf8Alloc(cert->containerName, NULL);
+
+		printf("[%" PRIu32
+		       "] %s\n\tReader: %s\n\tUser: %s@%s\n\tSubject: %s\n\tIssuer: %s\n\tUPN: %s\n",
+		       i, container_name, reader, cert->userHint, cert->domainHint, cert->subject,
+		       cert->issuer, cert->upn);
+
+		free(reader);
+		free(container_name);
+	}
+
+	while (1)
+	{
+		char input[10] = { 0 };
+
+		printf("\nChoose a smartcard to use for %s (0 - %" PRIu32 "): ",
+		       gateway ? "gateway authentication" : "logon", count - 1);
+		fflush(stdout);
+		if (!fgets(input, 10, stdin))
+		{
+			WLog_ERR(TAG, "could not read from stdin");
+			return FALSE;
+		}
+
+		answer = strtoul(input, &p, 10);
+		if ((*p == '\n' && p != input) && answer < count)
+		{
+			*choice = answer;
+			return TRUE;
+		}
+	}
 }
 
 #if defined(WITH_FREERDP_DEPRECATED)
@@ -506,9 +593,15 @@ BOOL client_cli_gw_authenticate(freerdp* instance, char** username, char** passw
 }
 #endif
 
-static DWORD client_cli_accept_certificate(rdpSettings* settings)
+static DWORD client_cli_accept_certificate(freerdp* instance)
 {
 	int answer;
+
+	WINPR_ASSERT(instance);
+	WINPR_ASSERT(instance->context);
+
+	const rdpSettings* settings = instance->context->settings;
+	WINPR_ASSERT(settings);
 
 	if (settings->CredentialsFromStdin)
 		return 0;
@@ -517,9 +610,9 @@ static DWORD client_cli_accept_certificate(rdpSettings* settings)
 	{
 		printf("Do you trust the above certificate? (Y/T/N) ");
 		fflush(stdout);
-		answer = fgetc(stdin);
+		answer = freerdp_interruptible_getc(instance->context, stdin);
 
-		if (feof(stdin))
+		if ((answer == EOF) || feof(stdin))
 		{
 			printf("\nError: Could not read answer from stdin.");
 
@@ -534,17 +627,23 @@ static DWORD client_cli_accept_certificate(rdpSettings* settings)
 		{
 			case 'y':
 			case 'Y':
-				fgetc(stdin);
+				answer = freerdp_interruptible_getc(instance->context, stdin);
+				if (answer == EOF)
+					return 0;
 				return 1;
 
 			case 't':
 			case 'T':
-				fgetc(stdin);
+				answer = freerdp_interruptible_getc(instance->context, stdin);
+				if (answer == EOF)
+					return 0;
 				return 2;
 
 			case 'n':
 			case 'N':
-				fgetc(stdin);
+				answer = freerdp_interruptible_getc(instance->context, stdin);
+				if (answer == EOF)
+					return 0;
 				return 0;
 
 			default:
@@ -553,14 +652,12 @@ static DWORD client_cli_accept_certificate(rdpSettings* settings)
 
 		printf("\n");
 	}
-
-	return 0;
 }
 
 /** Callback set in the rdp_freerdp structure, and used to make a certificate validation
  *  when the connection requires it.
  *  This function will actually be called by tls_verify_certificate().
- *  @see rdp_client_connect() and tls_connect()
+ *  @see rdp_client_connect() and freerdp_tls_connect()
  *  @deprecated Use client_cli_verify_certificate_ex
  *  @param instance - pointer to the rdp_freerdp structure that contains the connection settings
  *  @param common_name
@@ -585,14 +682,14 @@ DWORD client_cli_verify_certificate(freerdp* instance, const char* common_name, 
 	printf("The above X.509 certificate could not be verified, possibly because you do not have\n"
 	       "the CA certificate in your certificate store, or the certificate has expired.\n"
 	       "Please look at the OpenSSL documentation on how to add a private CA to the store.\n");
-	return client_cli_accept_certificate(instance->settings);
+	return client_cli_accept_certificate(instance);
 }
 #endif
 
 /** Callback set in the rdp_freerdp structure, and used to make a certificate validation
  *  when the connection requires it.
  *  This function will actually be called by tls_verify_certificate().
- *  @see rdp_client_connect() and tls_connect()
+ *  @see rdp_client_connect() and freerdp_tls_connect()
  *  @param instance     pointer to the rdp_freerdp structure that contains the connection settings
  *  @param host         The host currently connecting to
  *  @param port         The port currently connecting to
@@ -609,6 +706,11 @@ DWORD client_cli_verify_certificate_ex(freerdp* instance, const char* host, UINT
                                        const char* issuer, const char* fingerprint, DWORD flags)
 {
 	const char* type = "RDP-Server";
+
+	WINPR_ASSERT(instance);
+	WINPR_ASSERT(instance->context);
+	WINPR_ASSERT(instance->context->settings);
+
 	if (flags & VERIFY_CERT_FLAG_GATEWAY)
 		type = "RDP-Gateway";
 
@@ -634,13 +736,13 @@ DWORD client_cli_verify_certificate_ex(freerdp* instance, const char* host, UINT
 	printf("The above X.509 certificate could not be verified, possibly because you do not have\n"
 	       "the CA certificate in your certificate store, or the certificate has expired.\n"
 	       "Please look at the OpenSSL documentation on how to add a private CA to the store.\n");
-	return client_cli_accept_certificate(instance->settings);
+	return client_cli_accept_certificate(instance);
 }
 
 /** Callback set in the rdp_freerdp structure, and used to make a certificate validation
  *  when a stored certificate does not match the remote counterpart.
  *  This function will actually be called by tls_verify_certificate().
- *  @see rdp_client_connect() and tls_connect()
+ *  @see rdp_client_connect() and freerdp_tls_connect()
  *  @deprecated Use client_cli_verify_changed_certificate_ex
  *  @param instance - pointer to the rdp_freerdp structure that contains the connection settings
  *  @param common_name
@@ -678,14 +780,14 @@ DWORD client_cli_verify_changed_certificate(freerdp* instance, const char* commo
 	       "connections.\n"
 	       "This may indicate that the certificate has been tampered with.\n"
 	       "Please contact the administrator of the RDP server and clarify.\n");
-	return client_cli_accept_certificate(instance->settings);
+	return client_cli_accept_certificate(instance);
 }
 #endif
 
 /** Callback set in the rdp_freerdp structure, and used to make a certificate validation
  *  when a stored certificate does not match the remote counterpart.
  *  This function will actually be called by tls_verify_certificate().
- *  @see rdp_client_connect() and tls_connect()
+ *  @see rdp_client_connect() and freerdp_tls_connect()
  *  @param instance        pointer to the rdp_freerdp structure that contains the connection
  * settings
  *  @param host            The host currently connecting to
@@ -708,6 +810,10 @@ DWORD client_cli_verify_changed_certificate_ex(freerdp* instance, const char* ho
                                                const char* old_fingerprint, DWORD flags)
 {
 	const char* type = "RDP-Server";
+
+	WINPR_ASSERT(instance);
+	WINPR_ASSERT(instance->context);
+	WINPR_ASSERT(instance->context->settings);
 
 	if (flags & VERIFY_CERT_FLAG_GATEWAY)
 		type = "RDP-Gateway";
@@ -760,7 +866,7 @@ DWORD client_cli_verify_changed_certificate_ex(freerdp* instance, const char* ho
 	       "connections.\n"
 	       "This may indicate that the certificate has been tampered with.\n"
 	       "Please contact the administrator of the RDP server and clarify.\n");
-	return client_cli_accept_certificate(instance->settings);
+	return client_cli_accept_certificate(instance);
 }
 
 BOOL client_cli_present_gateway_message(freerdp* instance, UINT32 type, BOOL isDisplayMandatory,
@@ -770,6 +876,10 @@ BOOL client_cli_present_gateway_message(freerdp* instance, UINT32 type, BOOL isD
 	int answer;
 	const char* msgType = (type == GATEWAY_MESSAGE_CONSENT) ? "Consent message" : "Service message";
 
+	WINPR_ASSERT(instance);
+	WINPR_ASSERT(instance->context);
+	WINPR_ASSERT(instance->context->settings);
+
 	if (!isDisplayMandatory && !isConsentMandatory)
 		return TRUE;
 
@@ -778,8 +888,8 @@ BOOL client_cli_present_gateway_message(freerdp* instance, UINT32 type, BOOL isD
 	printf("%.*S\n", (int)length, message);
 #else
 	{
-		LPSTR msg;
-		if (ConvertFromUnicode(CP_UTF8, 0, message, (int)(length / 2), &msg, 0, NULL, NULL) < 1)
+		LPSTR msg = ConvertWCharNToUtf8Alloc(message, length / sizeof(WCHAR), NULL);
+		if (!msg)
 		{
 			printf("Failed to convert message!\n");
 			return FALSE;
@@ -793,9 +903,9 @@ BOOL client_cli_present_gateway_message(freerdp* instance, UINT32 type, BOOL isD
 	{
 		printf("I understand and agree to the terms of this policy (Y/N) \n");
 		fflush(stdout);
-		answer = fgetc(stdin);
+		answer = freerdp_interruptible_getc(instance->context, stdin);
 
-		if (feof(stdin))
+		if ((answer == EOF) || feof(stdin))
 		{
 			printf("\nError: Could not read answer from stdin.\n");
 			return FALSE;
@@ -805,12 +915,14 @@ BOOL client_cli_present_gateway_message(freerdp* instance, UINT32 type, BOOL isD
 		{
 			case 'y':
 			case 'Y':
-				fgetc(stdin);
+				answer = freerdp_interruptible_getc(instance->context, stdin);
+				if (answer == EOF)
+					return FALSE;
 				return TRUE;
 
 			case 'n':
 			case 'N':
-				fgetc(stdin);
+				freerdp_interruptible_getc(instance->context, stdin);
 				return FALSE;
 
 			default:
@@ -823,6 +935,59 @@ BOOL client_cli_present_gateway_message(freerdp* instance, UINT32 type, BOOL isD
 	return TRUE;
 }
 
+BOOL client_cli_get_aad_auth_code(freerdp* instance, const char* hostname, char** code,
+                                  const char** client_id, const char** redirect_uri)
+{
+	size_t size = 0;
+	char* url = NULL;
+
+	WINPR_ASSERT(instance);
+	WINPR_ASSERT(hostname);
+	WINPR_ASSERT(code);
+	WINPR_ASSERT(client_id);
+	WINPR_ASSERT(redirect_uri);
+
+	*code = NULL;
+	*client_id = "a85cf173-4192-42f8-81fa-777a763e6e2c";
+	*redirect_uri = "https%3A%2F%2Flogin.microsoftonline.com%2Fcommon%2Foauth2%2Fnativeclient";
+
+	printf("Browse to: https://login.microsoftonline.com/common/oauth2/v2.0/"
+	       "authorize?client_id=%s&response_type="
+	       "code&scope=ms-device-service%%3A%%2F%%2Ftermsrv.wvd.microsoft.com%%2Fname%%"
+	       "2F%s%%2Fuser_impersonation&redirect_uri=%s"
+	       "\n",
+	       *client_id, hostname, *redirect_uri);
+	printf("Paste redirect URL here: \n");
+
+	if (freerdp_interruptible_get_line(instance->context, &url, &size, stdin) < 0)
+		return FALSE;
+
+	for (char* p = strchr(url, '?'); p++ != NULL; p = strchr(p, '&'))
+	{
+		if (strncmp(p, "code=", 5) == 0)
+		{
+			char* end = NULL;
+			p += 5;
+
+			end = strchr(p, '&');
+			if (end)
+				*end = 0;
+			else
+				end = strchr(p, '\0');
+
+			*code = calloc(1, end - p);
+			if (!(*code))
+				break;
+
+			strcpy(*code, p);
+			break;
+		}
+	}
+
+	free(url);
+	return (*code != NULL);
+}
+
 BOOL client_auto_reconnect(freerdp* instance)
 {
 	return client_auto_reconnect_ex(instance, NULL);
@@ -830,15 +995,20 @@ BOOL client_auto_reconnect(freerdp* instance)
 
 BOOL client_auto_reconnect_ex(freerdp* instance, BOOL (*window_events)(freerdp* instance))
 {
+	BOOL retry = TRUE;
 	UINT32 error;
 	UINT32 maxRetries;
 	UINT32 numRetries = 0;
 	rdpSettings* settings;
 
-	if (!instance || !instance->settings)
+	if (!instance)
 		return FALSE;
 
-	settings = instance->settings;
+	WINPR_ASSERT(instance->context);
+
+	settings = instance->context->settings;
+	WINPR_ASSERT(settings);
+
 	maxRetries = settings->AutoReconnectMaxRetries;
 
 	/* Only auto reconnect on network disconnects. */
@@ -864,11 +1034,18 @@ BOOL client_auto_reconnect_ex(freerdp* instance, BOOL (*window_events)(freerdp* 
 		return FALSE;
 	}
 
-	/* Perform an auto-reconnect. */
-	while (TRUE)
+	switch (freerdp_get_last_error(instance->context))
 	{
-		UINT32 x;
+		case FREERDP_ERROR_CONNECT_CANCELLED:
+			WLog_WARN(TAG, "Connection aborted by user");
+			return FALSE;
+		default:
+			break;
+	}
 
+	/* Perform an auto-reconnect. */
+	while (retry)
+	{
 		/* Quit retrying if max retries has been exceeded */
 		if ((maxRetries > 0) && (numRetries++ >= maxRetries))
 		{
@@ -881,15 +1058,599 @@ BOOL client_auto_reconnect_ex(freerdp* instance, BOOL (*window_events)(freerdp* 
 		if (freerdp_reconnect(instance))
 			return TRUE;
 
-		for (x = 0; x < 50; x++)
+		switch (freerdp_get_last_error(instance->context))
+		{
+			case FREERDP_ERROR_CONNECT_CANCELLED:
+				WLog_WARN(TAG, "Autoreconnect aborted by user");
+				return FALSE;
+			default:
+				break;
+		}
+		for (UINT32 x = 0; x < 50; x++)
 		{
 			if (!IFCALLRESULT(TRUE, window_events, instance))
 				return FALSE;
 
-			Sleep(100);
+			Sleep(10);
 		}
 	}
 
 	WLog_ERR(TAG, "Maximum reconnect retries exceeded");
 	return FALSE;
+}
+
+int freerdp_client_common_stop(rdpContext* context)
+{
+	rdpClientContext* cctx = (rdpClientContext*)context;
+	WINPR_ASSERT(cctx);
+
+	freerdp_abort_connect_context(&cctx->context);
+
+	if (cctx->thread)
+	{
+		WaitForSingleObject(cctx->thread, INFINITE);
+		CloseHandle(cctx->thread);
+		cctx->thread = NULL;
+	}
+
+	return 0;
+}
+
+#if defined(CHANNEL_ENCOMSP_CLIENT)
+BOOL freerdp_client_encomsp_toggle_control(EncomspClientContext* encomsp)
+{
+	rdpClientContext* cctx;
+	BOOL state;
+
+	if (!encomsp)
+		return FALSE;
+
+	cctx = (rdpClientContext*)encomsp->custom;
+
+	state = cctx->controlToggle;
+	cctx->controlToggle = !cctx->controlToggle;
+	return freerdp_client_encomsp_set_control(encomsp, state);
+}
+
+BOOL freerdp_client_encomsp_set_control(EncomspClientContext* encomsp, BOOL control)
+{
+	ENCOMSP_CHANGE_PARTICIPANT_CONTROL_LEVEL_PDU pdu = { 0 };
+
+	if (!encomsp)
+		return FALSE;
+
+	pdu.ParticipantId = encomsp->participantId;
+	pdu.Flags = ENCOMSP_REQUEST_VIEW;
+
+	if (control)
+		pdu.Flags |= ENCOMSP_REQUEST_INTERACT;
+
+	encomsp->ChangeParticipantControlLevel(encomsp, &pdu);
+
+	return TRUE;
+}
+
+static UINT
+client_encomsp_participant_created(EncomspClientContext* context,
+                                   const ENCOMSP_PARTICIPANT_CREATED_PDU* participantCreated)
+{
+	rdpClientContext* cctx;
+	rdpSettings* settings;
+	BOOL request;
+
+	if (!context || !context->custom || !participantCreated)
+		return ERROR_INVALID_PARAMETER;
+
+	cctx = (rdpClientContext*)context->custom;
+	WINPR_ASSERT(cctx);
+
+	settings = cctx->context.settings;
+	WINPR_ASSERT(settings);
+
+	if (participantCreated->Flags & ENCOMSP_IS_PARTICIPANT)
+		context->participantId = participantCreated->ParticipantId;
+
+	request = freerdp_settings_get_bool(settings, FreeRDP_RemoteAssistanceRequestControl);
+	if (request && (participantCreated->Flags & ENCOMSP_MAY_VIEW) &&
+	    !(participantCreated->Flags & ENCOMSP_MAY_INTERACT))
+	{
+		if (!freerdp_client_encomsp_set_control(context, TRUE))
+			return ERROR_INTERNAL_ERROR;
+
+		/* if auto-request-control setting is enabled then only request control once upon connect,
+		 * otherwise it will auto request control again every time server turns off control which
+		 * is a bit annoying */
+		freerdp_settings_set_bool(settings, FreeRDP_RemoteAssistanceRequestControl, FALSE);
+	}
+
+	return CHANNEL_RC_OK;
+}
+
+static void client_encomsp_init(rdpClientContext* cctx, EncomspClientContext* encomsp)
+{
+	cctx->encomsp = encomsp;
+	encomsp->custom = (void*)cctx;
+	encomsp->ParticipantCreated = client_encomsp_participant_created;
+}
+
+static void client_encomsp_uninit(rdpClientContext* cctx, EncomspClientContext* encomsp)
+{
+	if (encomsp)
+	{
+		encomsp->custom = NULL;
+		encomsp->ParticipantCreated = NULL;
+	}
+
+	if (cctx)
+		cctx->encomsp = NULL;
+}
+#endif
+
+void freerdp_client_OnChannelConnectedEventHandler(void* context,
+                                                   const ChannelConnectedEventArgs* e)
+{
+	rdpClientContext* cctx = (rdpClientContext*)context;
+
+	WINPR_ASSERT(cctx);
+	WINPR_ASSERT(e);
+
+	if (0)
+	{
+	}
+#if defined(CHANNEL_AINPUT_CLIENT)
+	else if (strcmp(e->name, AINPUT_DVC_CHANNEL_NAME) == 0)
+		cctx->ainput = (AInputClientContext*)e->pInterface;
+#endif
+#if defined(CHANNEL_RDPEI_CLIENT)
+	else if (strcmp(e->name, RDPEI_DVC_CHANNEL_NAME) == 0)
+	{
+		cctx->rdpei = (RdpeiClientContext*)e->pInterface;
+	}
+#endif
+#if defined(CHANNEL_RDPGFX_CLIENT)
+	else if (strcmp(e->name, RDPGFX_DVC_CHANNEL_NAME) == 0)
+	{
+		gdi_graphics_pipeline_init(cctx->context.gdi, (RdpgfxClientContext*)e->pInterface);
+	}
+#endif
+#if defined(CHANNEL_GEOMETRY_CLIENT)
+	else if (strcmp(e->name, GEOMETRY_DVC_CHANNEL_NAME) == 0)
+	{
+		gdi_video_geometry_init(cctx->context.gdi, (GeometryClientContext*)e->pInterface);
+	}
+#endif
+#if defined(CHANNEL_VIDEO_CLIENT)
+	else if (strcmp(e->name, VIDEO_CONTROL_DVC_CHANNEL_NAME) == 0)
+	{
+		gdi_video_control_init(cctx->context.gdi, (VideoClientContext*)e->pInterface);
+	}
+	else if (strcmp(e->name, VIDEO_DATA_DVC_CHANNEL_NAME) == 0)
+	{
+		gdi_video_data_init(cctx->context.gdi, (VideoClientContext*)e->pInterface);
+	}
+#endif
+#if defined(CHANNEL_ENCOMSP_CLIENT)
+	else if (strcmp(e->name, ENCOMSP_SVC_CHANNEL_NAME) == 0)
+	{
+		client_encomsp_init(cctx, (EncomspClientContext*)e->pInterface);
+	}
+#endif
+}
+
+void freerdp_client_OnChannelDisconnectedEventHandler(void* context,
+                                                      const ChannelDisconnectedEventArgs* e)
+{
+	rdpClientContext* cctx = (rdpClientContext*)context;
+
+	WINPR_ASSERT(cctx);
+	WINPR_ASSERT(e);
+
+	if (0)
+	{
+	}
+#if defined(CHANNEL_AINPUT_CLIENT)
+	else if (strcmp(e->name, AINPUT_DVC_CHANNEL_NAME) == 0)
+		cctx->ainput = NULL;
+#endif
+#if defined(CHANNEL_RDPEI_CLIENT)
+	else if (strcmp(e->name, RDPEI_DVC_CHANNEL_NAME) == 0)
+	{
+		cctx->rdpei = NULL;
+	}
+#endif
+#if defined(CHANNEL_RDPGFX_CLIENT)
+	else if (strcmp(e->name, RDPGFX_DVC_CHANNEL_NAME) == 0)
+	{
+		gdi_graphics_pipeline_uninit(cctx->context.gdi, (RdpgfxClientContext*)e->pInterface);
+	}
+#endif
+#if defined(CHANNEL_GEOMETRY_CLIENT)
+	else if (strcmp(e->name, GEOMETRY_DVC_CHANNEL_NAME) == 0)
+	{
+		gdi_video_geometry_uninit(cctx->context.gdi, (GeometryClientContext*)e->pInterface);
+	}
+#endif
+#if defined(CHANNEL_VIDEO_CLIENT)
+	else if (strcmp(e->name, VIDEO_CONTROL_DVC_CHANNEL_NAME) == 0)
+	{
+		gdi_video_control_uninit(cctx->context.gdi, (VideoClientContext*)e->pInterface);
+	}
+	else if (strcmp(e->name, VIDEO_DATA_DVC_CHANNEL_NAME) == 0)
+	{
+		gdi_video_data_uninit(cctx->context.gdi, (VideoClientContext*)e->pInterface);
+	}
+#endif
+#if defined(CHANNEL_ENCOMSP_CLIENT)
+	else if (strcmp(e->name, ENCOMSP_SVC_CHANNEL_NAME) == 0)
+	{
+		client_encomsp_uninit(cctx, (EncomspClientContext*)e->pInterface);
+	}
+#endif
+}
+
+BOOL freerdp_client_send_wheel_event(rdpClientContext* cctx, UINT16 mflags)
+{
+	BOOL handled = FALSE;
+
+	WINPR_ASSERT(cctx);
+
+#if defined(CHANNEL_AINPUT_CLIENT)
+	if (cctx->ainput)
+	{
+		UINT rc;
+		UINT64 flags = 0;
+		INT32 x = 0, y = 0;
+		INT32 value = mflags & 0xFF;
+
+		if (mflags & PTR_FLAGS_WHEEL_NEGATIVE)
+			value = -1 * (0x100 - value);
+
+		/* We have discrete steps, scale this so we can also support high
+		 * resolution wheels. */
+		value *= 0x10000;
+
+		if (mflags & PTR_FLAGS_WHEEL)
+		{
+			flags |= AINPUT_FLAGS_WHEEL;
+			y = value;
+		}
+
+		if (mflags & PTR_FLAGS_HWHEEL)
+		{
+			flags |= AINPUT_FLAGS_WHEEL;
+			x = value;
+		}
+
+		WINPR_ASSERT(cctx->ainput->AInputSendInputEvent);
+		rc = cctx->ainput->AInputSendInputEvent(cctx->ainput, flags, x, y);
+		if (rc == CHANNEL_RC_OK)
+			handled = TRUE;
+	}
+#endif
+	if (!handled)
+		freerdp_input_send_mouse_event(cctx->context.input, mflags, 0, 0);
+
+	return TRUE;
+}
+
+#if defined(CHANNEL_AINPUT_CLIENT)
+static INLINE BOOL ainput_send_diff_event(rdpClientContext* cctx, UINT64 flags, INT32 x, INT32 y)
+{
+	UINT rc;
+
+	WINPR_ASSERT(cctx);
+	WINPR_ASSERT(cctx->ainput);
+	WINPR_ASSERT(cctx->ainput->AInputSendInputEvent);
+
+	rc = cctx->ainput->AInputSendInputEvent(cctx->ainput, flags, x, y);
+
+	return rc == CHANNEL_RC_OK;
+}
+#endif
+
+BOOL freerdp_client_send_button_event(rdpClientContext* cctx, BOOL relative, UINT16 mflags, INT32 x,
+                                      INT32 y)
+{
+	BOOL handled = FALSE;
+
+	WINPR_ASSERT(cctx);
+
+#if defined(CHANNEL_AINPUT_CLIENT)
+	if (cctx->ainput)
+	{
+		UINT64 flags = 0;
+		BOOL relativeInput =
+		    freerdp_settings_get_bool(cctx->context.settings, FreeRDP_MouseUseRelativeMove);
+
+		if (cctx->mouse_grabbed && relativeInput)
+			flags |= AINPUT_FLAGS_HAVE_REL;
+
+		if (relative)
+			flags |= AINPUT_FLAGS_REL;
+
+		if (mflags & PTR_FLAGS_DOWN)
+			flags |= AINPUT_FLAGS_DOWN;
+		if (mflags & PTR_FLAGS_BUTTON1)
+			flags |= AINPUT_FLAGS_BUTTON1;
+		if (mflags & PTR_FLAGS_BUTTON2)
+			flags |= AINPUT_FLAGS_BUTTON2;
+		if (mflags & PTR_FLAGS_BUTTON3)
+			flags |= AINPUT_FLAGS_BUTTON3;
+		if (mflags & PTR_FLAGS_MOVE)
+			flags |= AINPUT_FLAGS_MOVE;
+		handled = ainput_send_diff_event(cctx, flags, x, y);
+	}
+#endif
+
+	if (!handled)
+	{
+		if (relative)
+		{
+			cctx->lastX += x;
+			cctx->lastY += y;
+			WLog_WARN(TAG, "Relative mouse input channel not available, sending absolute!");
+		}
+		else
+		{
+			cctx->lastX = x;
+			cctx->lastY = y;
+		}
+		freerdp_input_send_mouse_event(cctx->context.input, mflags, (UINT16)cctx->lastX,
+		                               (UINT16)cctx->lastY);
+	}
+	return TRUE;
+}
+
+BOOL freerdp_client_send_extended_button_event(rdpClientContext* cctx, BOOL relative, UINT16 mflags,
+                                               INT32 x, INT32 y)
+{
+	BOOL handled = FALSE;
+	WINPR_ASSERT(cctx);
+
+#if defined(CHANNEL_AINPUT_CLIENT)
+	if (cctx->ainput)
+	{
+		UINT64 flags = 0;
+
+		if (relative)
+			flags |= AINPUT_FLAGS_REL;
+		if (mflags & PTR_XFLAGS_DOWN)
+			flags |= AINPUT_FLAGS_DOWN;
+		if (mflags & PTR_XFLAGS_BUTTON1)
+			flags |= AINPUT_XFLAGS_BUTTON1;
+		if (mflags & PTR_XFLAGS_BUTTON2)
+			flags |= AINPUT_XFLAGS_BUTTON2;
+
+		handled = ainput_send_diff_event(cctx, flags, x, y);
+	}
+#endif
+
+	if (!handled)
+	{
+		if (relative)
+		{
+			cctx->lastX += x;
+			cctx->lastY += y;
+			WLog_WARN(TAG, "Relative mouse input channel not available, sending absolute!");
+		}
+		else
+		{
+			cctx->lastX = x;
+			cctx->lastY = y;
+		}
+		freerdp_input_send_extended_mouse_event(cctx->context.input, mflags, (UINT16)cctx->lastX,
+		                                        (UINT16)cctx->lastY);
+	}
+
+	return TRUE;
+}
+
+static BOOL freerdp_handle_touch_up(rdpClientContext* cctx, const FreeRDP_TouchContact* contact)
+{
+	WINPR_ASSERT(cctx);
+	WINPR_ASSERT(contact);
+
+#if defined(CHANNEL_RDPEI_CLIENT)
+	RdpeiClientContext* rdpei = cctx->rdpei;
+
+	if (!rdpei)
+	{
+		UINT16 flags = 0;
+		flags |= PTR_FLAGS_BUTTON1;
+
+		WINPR_ASSERT(contact->x <= UINT16_MAX);
+		WINPR_ASSERT(contact->y <= UINT16_MAX);
+		return freerdp_client_send_button_event(cctx, FALSE, flags, contact->x, contact->y);
+	}
+	else
+	{
+		int contactId;
+
+		if (rdpei->TouchRawEvent)
+		{
+			const UINT32 flags = RDPINPUT_CONTACT_FLAG_UP;
+			const UINT32 contactFlags = ((contact->flags & FREERDP_TOUCH_HAS_PRESSURE) != 0)
+			                                ? CONTACT_DATA_PRESSURE_PRESENT
+			                                : 0;
+			rdpei->TouchRawEvent(rdpei, contact->id, contact->x, contact->y, &contactId, flags,
+			                     contactFlags, contact->pressure);
+		}
+		else
+		{
+			WINPR_ASSERT(rdpei->TouchEnd);
+			rdpei->TouchEnd(rdpei, contact->id, contact->x, contact->y, &contactId);
+		}
+	}
+#else
+	WLog_WARN(TAG, "Touch event detected but RDPEI support not compiled in. Recompile with "
+	               "-DWITH_CHANNELS=ON");
+#endif
+
+	return TRUE;
+}
+
+static BOOL freerdp_handle_touch_down(rdpClientContext* cctx, const FreeRDP_TouchContact* contact)
+{
+	WINPR_ASSERT(cctx);
+	WINPR_ASSERT(contact);
+
+#if defined(CHANNEL_RDPEI_CLIENT)
+	RdpeiClientContext* rdpei = cctx->rdpei;
+
+	// Emulate mouse click if touch is not possible, like in login screen
+	if (!rdpei)
+	{
+		UINT16 flags = 0;
+		flags |= PTR_FLAGS_DOWN;
+		flags |= PTR_FLAGS_MOVE;
+		flags |= PTR_FLAGS_BUTTON1;
+
+		WINPR_ASSERT(contact->x <= UINT16_MAX);
+		WINPR_ASSERT(contact->y <= UINT16_MAX);
+		return freerdp_client_send_button_event(cctx, FALSE, flags, contact->x, contact->y);
+	}
+	else
+	{
+		int contactId;
+
+		if (rdpei->TouchRawEvent)
+		{
+			const UINT32 flags = RDPINPUT_CONTACT_FLAG_DOWN;
+			const UINT32 contactFlags = ((contact->flags & FREERDP_TOUCH_HAS_PRESSURE) != 0)
+			                                ? CONTACT_DATA_PRESSURE_PRESENT
+			                                : 0;
+			rdpei->TouchRawEvent(rdpei, contact->id, contact->x, contact->y, &contactId, flags,
+			                     contactFlags, contact->pressure);
+		}
+		else
+		{
+			WINPR_ASSERT(rdpei->TouchBegin);
+			rdpei->TouchBegin(rdpei, contact->id, contact->x, contact->y, &contactId);
+		}
+	}
+#else
+	WLog_WARN(TAG, "Touch event detected but RDPEI support not compiled in. Recompile with "
+	               "-DWITH_CHANNELS=ON");
+#endif
+
+	return TRUE;
+}
+
+static BOOL freerdp_handle_touch_motion(rdpClientContext* cctx, const FreeRDP_TouchContact* contact)
+{
+	WINPR_ASSERT(cctx);
+	WINPR_ASSERT(contact);
+
+#if defined(CHANNEL_RDPEI_CLIENT)
+	RdpeiClientContext* rdpei = cctx->rdpei;
+
+	if (!rdpei)
+	{
+		UINT16 flags = 0;
+		flags |= PTR_FLAGS_MOVE;
+
+		WINPR_ASSERT(contact->x <= UINT16_MAX);
+		WINPR_ASSERT(contact->y <= UINT16_MAX);
+		return freerdp_client_send_button_event(cctx, FALSE, flags, contact->x, contact->y);
+	}
+	else
+	{
+		int contactId;
+
+		if (rdpei->TouchRawEvent)
+		{
+			const UINT32 flags = RDPINPUT_CONTACT_FLAG_UPDATE;
+			const UINT32 contactFlags = ((contact->flags & FREERDP_TOUCH_HAS_PRESSURE) != 0)
+			                                ? CONTACT_DATA_PRESSURE_PRESENT
+			                                : 0;
+			rdpei->TouchRawEvent(rdpei, contact->id, contact->x, contact->y, &contactId, flags,
+			                     contactFlags, contact->pressure);
+		}
+		else
+		{
+			WINPR_ASSERT(rdpei->TouchUpdate);
+			rdpei->TouchUpdate(rdpei, contact->id, contact->x, contact->y, &contactId);
+		}
+	}
+#else
+	WLog_WARN(TAG, "Touch event detected but RDPEI support not compiled in. Recompile with "
+	               "-DWITH_CHANNELS=ON");
+#endif
+
+	return TRUE;
+}
+
+static BOOL freerdp_client_touch_update(rdpClientContext* cctx, UINT32 flags, INT32 touchId,
+                                        UINT32 pressure, INT32 x, INT32 y,
+                                        const FreeRDP_TouchContact** ppcontact)
+{
+	WINPR_ASSERT(cctx);
+	WINPR_ASSERT(ppcontact);
+
+	for (size_t i = 0; i < ARRAYSIZE(cctx->contacts); i++)
+	{
+		FreeRDP_TouchContact* contact = &cctx->contacts[i];
+
+		if (contact->id == touchId)
+		{
+			*ppcontact = contact;
+
+			contact->flags = flags;
+			contact->pressure = pressure;
+			contact->x = x;
+			contact->y = y;
+			return TRUE;
+		}
+	}
+
+	return FALSE;
+}
+
+BOOL freerdp_client_handle_touch(rdpClientContext* cctx, UINT32 flags, INT32 finger,
+                                 UINT32 pressure, INT32 x, INT32 y)
+{
+	WINPR_ASSERT(cctx);
+
+	const FreeRDP_TouchContact* contact = NULL;
+
+	if (!freerdp_client_touch_update(cctx, flags, finger, pressure, x, y, &contact))
+		return FALSE;
+
+	switch (flags)
+	{
+		case FREERDP_TOUCH_DOWN:
+			return freerdp_handle_touch_down(cctx, contact);
+		case FREERDP_TOUCH_UP:
+			return freerdp_handle_touch_up(cctx, contact);
+		case FREERDP_TOUCH_MOTION:
+			return freerdp_handle_touch_motion(cctx, contact);
+		default:
+			WLog_WARN(TAG, "Unhandled FreeRDPTouchEventType %d, ignoring", flags);
+			return FALSE;
+	}
+}
+
+BOOL freerdp_client_load_channels(freerdp* instance)
+{
+	WINPR_ASSERT(instance);
+	WINPR_ASSERT(instance->context);
+
+	if (!freerdp_client_load_addins(instance->context->channels, instance->context->settings))
+	{
+		WLog_ERR(TAG, "Failed to load addins [%l08X]", GetLastError());
+		return FALSE;
+	}
+	return TRUE;
+}
+
+int client_cli_logon_error_info(freerdp* instance, UINT32 data, UINT32 type)
+{
+	const char* str_data = freerdp_get_logon_error_info_data(data);
+	const char* str_type = freerdp_get_logon_error_info_type(type);
+
+	if (!instance || !instance->context)
+		return -1;
+
+	WLog_INFO(TAG, "Logon Error Info %s [%s]", str_data, str_type);
+	return 1;
 }

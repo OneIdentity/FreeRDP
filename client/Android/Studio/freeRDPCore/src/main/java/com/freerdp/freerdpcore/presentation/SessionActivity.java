@@ -318,6 +318,12 @@ public class SessionActivity extends AppCompatActivity
 		                             View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
 	}
 
+	@Override public void onWindowFocusChanged(boolean hasFocus)
+	{
+		super.onWindowFocusChanged(hasFocus);
+		mClipboardManager.getPrimaryClipManually();
+	}
+
 	@Override protected void onStart()
 	{
 		super.onStart();
@@ -698,8 +704,10 @@ public class SessionActivity extends AppCompatActivity
 		// hide keyboards (if any visible) or send alt+f4 to the session
 		if (sysKeyboardVisible || extKeyboardVisible)
 			showKeyboard(false, false);
-		else
+		else if (ApplicationSettingsActivity.getUseBackAsAltf4(this))
+		{
 			keyboardMapper.sendAltF4();
+		}
 	}
 
 	@Override public boolean onKeyLongPress(int keyCode, KeyEvent event)

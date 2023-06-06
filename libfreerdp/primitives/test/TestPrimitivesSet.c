@@ -12,9 +12,7 @@
  * permissions and limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <winpr/sysinfo.h>
 #include "prim_test.h"
@@ -42,13 +40,13 @@ static BOOL test_set8u_func(void)
 {
 	pstatus_t status;
 	UINT32 off;
-	BYTE dest[1024];
 
 	for (off = 0; off < 16; ++off)
 	{
 		UINT32 len;
-		memset(dest, 3, sizeof(dest));
+		BYTE dest[1024];
 
+		memset(dest, 3, sizeof(dest));
 		for (len = 1; len < 48 - off; ++len)
 		{
 			status = generic->set_8u(0xa5, dest + off, len);
@@ -64,8 +62,9 @@ static BOOL test_set8u_func(void)
 	for (off = 0; off < 16; ++off)
 	{
 		UINT32 len;
-		memset(dest, 3, sizeof(dest));
+		BYTE dest[1024];
 
+		memset(dest, 3, sizeof(dest));
 		for (len = 1; len < 48 - off; ++len)
 		{
 			status = optimized->set_8u(0xa5, dest + off, len);
@@ -123,13 +122,12 @@ static BOOL test_set32s_func(void)
 {
 	pstatus_t status;
 	UINT32 off;
-	INT32 dest[1024];
 	const INT32 value = -0x12345678;
 
 	for (off = 0; off < 16; ++off)
 	{
 		UINT32 len;
-		memset(dest, 0, sizeof(dest));
+		INT32 dest[1024] = { 0 };
 
 		for (len = 1; len < 48 - off; ++len)
 		{
@@ -146,7 +144,7 @@ static BOOL test_set32s_func(void)
 	for (off = 0; off < 16; ++off)
 	{
 		UINT32 len;
-		memset(dest, 0, sizeof(dest));
+		INT32 dest[1024] = { 0 };
 
 		for (len = 1; len < 48 - off; ++len)
 		{
@@ -186,13 +184,12 @@ static BOOL test_set32u_func(void)
 {
 	pstatus_t status;
 	UINT32 off;
-	UINT32 dest[1024];
 	const UINT32 value = 0xABCDEF12;
 
 	for (off = 0; off < 16; ++off)
 	{
 		UINT32 len;
-		memset(dest, 0, sizeof(dest));
+		UINT32 dest[1024] = { 0 };
 
 		for (len = 1; len < 48 - off; ++len)
 		{
@@ -209,7 +206,7 @@ static BOOL test_set32u_func(void)
 	for (off = 0; off < 16; ++off)
 	{
 		UINT32 len;
-		memset(dest, 0, sizeof(dest));
+		UINT32 dest[1024] = { 0 };
 
 		for (len = 1; len < 48 - off; ++len)
 		{

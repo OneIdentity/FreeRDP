@@ -19,9 +19,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,6 +27,7 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 
+#include <winpr/assert.h>
 #include <winpr/crt.h>
 
 #include <freerdp/log.h>
@@ -116,7 +115,12 @@ int xf_list_monitors(xfContext* xfc)
 static BOOL xf_is_monitor_id_active(xfContext* xfc, UINT32 id)
 {
 	UINT32 index;
-	rdpSettings* settings = xfc->context.settings;
+	const rdpSettings* settings;
+
+	WINPR_ASSERT(xfc);
+
+	settings = xfc->common.context.settings;
+	WINPR_ASSERT(settings);
 
 	if (!settings->NumMonitorIds)
 		return TRUE;
@@ -136,24 +140,24 @@ BOOL xf_detect_monitors(xfContext* xfc, UINT32* pMaxWidth, UINT32* pMaxHeight)
 	int nmonitors = 0;
 	int monitor_index = 0;
 	BOOL primaryMonitorFound = FALSE;
-	VIRTUAL_SCREEN* vscreen;
-	rdpSettings* settings;
-	int mouse_x, mouse_y, _dummy_i;
-	Window _dummy_w;
+	VIRTUAL_SCREEN* vscreen = NULL;
+	rdpSettings* settings = NULL;
+	int mouse_x = 0, mouse_y = 0, _dummy_i = 0;
+	Window _dummy_w = 0;
 	int current_monitor = 0;
-	Screen* screen;
+	Screen* screen = NULL;
 #if defined WITH_XINERAMA || defined WITH_XRANDR
-	int major, minor;
+	int major = 0, minor = 0;
 #endif
 #if defined(USABLE_XRANDR)
 	XRRMonitorInfo* rrmonitors = NULL;
 	BOOL useXRandr = FALSE;
 #endif
 
-	if (!xfc || !pMaxWidth || !pMaxHeight || !xfc->context.settings)
+	if (!xfc || !pMaxWidth || !pMaxHeight || !xfc->common.context.settings)
 		return FALSE;
 
-	settings = xfc->context.settings;
+	settings = xfc->common.context.settings;
 	vscreen = &xfc->vscreen;
 	*pMaxWidth = settings->DesktopWidth;
 	*pMaxHeight = settings->DesktopHeight;
@@ -217,10 +221,11 @@ BOOL xf_detect_monitors(xfContext* xfc, UINT32* pMaxWidth, UINT32* pMaxHeight)
 
 			for (i = 0; i < vscreen->nmonitors; i++)
 			{
-				vscreen->monitors[i].area.left = screenInfo[i].x_org;
-				vscreen->monitors[i].area.top = screenInfo[i].y_org;
-				vscreen->monitors[i].area.right = screenInfo[i].x_org + screenInfo[i].width - 1;
-				vscreen->monitors[i].area.bottom = screenInfo[i].y_org + screenInfo[i].height - 1;
+				MONITOR_INFO* monitor = &vscreen->monitors[i];
+				monitor->area.left = screenInfo[i].x_org;
+				monitor->area.top = screenInfo[i].y_org;
+				monitor->area.right = screenInfo[i].x_org + screenInfo[i].width - 1;
+				monitor->area.bottom = screenInfo[i].y_org + screenInfo[i].height - 1;
 			}
 		}
 
@@ -238,10 +243,10 @@ BOOL xf_detect_monitors(xfContext* xfc, UINT32* pMaxWidth, UINT32* pMaxHeight)
 
 		for (i = 0; i < vscreen->nmonitors; i++)
 		{
-			if ((mouse_x >= vscreen->monitors[i].area.left) &&
-			    (mouse_x <= vscreen->monitors[i].area.right) &&
-			    (mouse_y >= vscreen->monitors[i].area.top) &&
-			    (mouse_y <= vscreen->monitors[i].area.bottom))
+			const MONITOR_INFO* monitor = &vscreen->monitors[i];
+
+			if ((mouse_x >= monitor->area.left) && (mouse_x <= monitor->area.right) &&
+			    (mouse_y >= monitor->area.top) && (mouse_y <= monitor->area.bottom))
 			{
 				current_monitor = i;
 				break;
@@ -264,8 +269,8 @@ BOOL xf_detect_monitors(xfContext* xfc, UINT32* pMaxWidth, UINT32* pMaxHeight)
 		 */
 		if (!settings->NumMonitorIds)
 		{
-			if (!freerdp_settings_set_pointer_len(settings, FreeRDP_MonitorIds, &current_monitor,
-			                                      1))
+			UINT32 id = current_monitor;
+			if (!freerdp_settings_set_pointer_len(settings, FreeRDP_MonitorIds, &id, 1))
 				goto fail;
 		}
 
@@ -368,6 +373,9 @@ BOOL xf_detect_monitors(xfContext* xfc, UINT32* pMaxWidth, UINT32* pMaxHeight)
 	 * command-line */
 	{
 		int i;
+		UINT32 nr = 0;
+		if (settings->MonitorIds)
+			nr = settings->MonitorIds[0];
 
 		for (i = 0; i < vscreen->nmonitors; i++)
 		{
@@ -410,7 +418,7 @@ BOOL xf_detect_monitors(xfContext* xfc, UINT32* pMaxWidth, UINT32* pMaxHeight)
 
 #endif
 
-			if ((UINT32)i == settings->MonitorIds[0])
+			if ((UINT32)i == nr)
 			{
 				settings->MonitorDefArray[nmonitors].is_primary = TRUE;
 				settings->MonitorLocalShiftX = settings->MonitorDefArray[nmonitors].x;
@@ -508,13 +516,14 @@ BOOL xf_detect_monitors(xfContext* xfc, UINT32* pMaxWidth, UINT32* pMaxHeight)
 			if (settings->NumMonitorIds)
 			{
 				/* The first monitor is the first in the setting which should be used */
-				monitor_index = settings->MonitorIds[0];
+				if (settings->MonitorIds)
+					monitor_index = settings->MonitorIds[0];
 			}
 			else
 			{
 				/* This is the same as when we would trust the Xinerama results..
 				   and set the monitor index to zero.
-				   The monitor listed with /monitor-list on index zero is always the primary
+				   The monitor listed with /list:monitor on index zero is always the primary
 				*/
 				screen = DefaultScreenOfDisplay(xfc->display);
 				monitor_index = XScreenNumberOfScreen(screen);
@@ -528,7 +537,6 @@ BOOL xf_detect_monitors(xfContext* xfc, UINT32* pMaxWidth, UINT32* pMaxHeight)
 				settings->MonitorDefArray[j].is_primary = TRUE;
 				settings->MonitorLocalShiftX = settings->MonitorDefArray[j].x;
 				settings->MonitorLocalShiftY = settings->MonitorDefArray[j].y;
-				primaryMonitorFound = TRUE;
 			}
 			else
 			{
@@ -572,7 +580,7 @@ BOOL xf_detect_monitors(xfContext* xfc, UINT32* pMaxWidth, UINT32* pMaxHeight)
 	/* some 2008 server freeze at logon if we announce support for monitor layout PDU with
 	 * #monitors < 2. So let's announce it only if we have more than 1 monitor.
 	 */
-	if (settings->MonitorCount)
+	if (settings->MonitorCount > 1)
 		settings->SupportMonitorLayoutPdu = TRUE;
 
 	rc = TRUE;

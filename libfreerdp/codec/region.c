@@ -68,7 +68,7 @@
  * rectangles in the same places (of the same width, of course).
  */
 
-struct _REGION16_DATA
+struct S_REGION16_DATA
 {
 	long size;
 	long nbRects;
@@ -140,10 +140,10 @@ static RECTANGLE_16* region16_extents_noconst(REGION16* region)
 
 BOOL rectangle_is_empty(const RECTANGLE_16* rect)
 {
-	/* A rectangle with width = 0 or height = 0 should be regarded
+	/* A rectangle with width <= 0 or height <= 0 should be regarded
 	 * as empty.
 	 */
-	return ((rect->left == rect->right) || (rect->top == rect->bottom)) ? TRUE : FALSE;
+	return ((rect->left >= rect->right) || (rect->top >= rect->bottom)) ? TRUE : FALSE;
 }
 
 BOOL region16_is_empty(const REGION16* region)
@@ -496,7 +496,6 @@ BOOL region16_union_rect(REGION16* dst, const REGION16* src, const RECTANGLE_16*
 	UINT32 usedRects, srcNbRects;
 	UINT16 topInterBand;
 	WINPR_ASSERT(src);
-	WINPR_ASSERT(src->data);
 	WINPR_ASSERT(dst);
 	srcExtents = region16_extents(src);
 	dstExtents = region16_extents_noconst(dst);
@@ -658,8 +657,8 @@ BOOL region16_union_rect(REGION16* dst, const REGION16* src, const RECTANGLE_16*
 		dstRect++;
 	}
 
-	if ((src == dst) && (src->data->size > 0) && (src->data != &empty_region))
-		free(src->data);
+	if ((src == dst) && (dst->data != &empty_region))
+		free(dst->data);
 
 	dstExtents->top = MIN(rect->top, srcExtents->top);
 	dstExtents->left = MIN(rect->left, srcExtents->left);
@@ -673,10 +672,7 @@ BOOL region16_union_rect(REGION16* dst, const REGION16* src, const RECTANGLE_16*
 	dst->data = newItems;
 
 	if (!dst->data)
-	{
-		free(newItems);
 		return FALSE;
-	}
 
 	dst->data->nbRects = usedRects;
 	return region16_simplify_bands(dst);

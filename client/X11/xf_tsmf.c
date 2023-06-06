@@ -17,9 +17,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <winpr/crt.h>
 
@@ -460,16 +458,16 @@ int xf_tsmf_init(xfContext* xfc, TsmfClientContext* tsmf)
 {
 #ifdef WITH_XV
 	return xf_tsmf_xv_init(xfc, tsmf);
-#endif
-
+#else
 	return 1;
+#endif
 }
 
 int xf_tsmf_uninit(xfContext* xfc, TsmfClientContext* tsmf)
 {
 #ifdef WITH_XV
 	return xf_tsmf_xv_uninit(xfc, tsmf);
-#endif
-
+#else
 	return 1;
+#endif
 }

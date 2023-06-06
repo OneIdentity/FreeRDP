@@ -25,9 +25,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <errno.h>
 #include <stdio.h>
@@ -46,13 +44,12 @@
 #include "drive_file.h"
 
 #ifdef WITH_DEBUG_RDPDR
-#define DEBUG_WSTR(msg, wstr)                                            \
-	do                                                                   \
-	{                                                                    \
-		LPSTR lpstr;                                                     \
-		ConvertFromUnicode(CP_UTF8, 0, wstr, -1, &lpstr, 0, NULL, NULL); \
-		WLog_DBG(TAG, msg, lpstr);                                       \
-		free(lpstr);                                                     \
+#define DEBUG_WSTR(msg, wstr)                              \
+	do                                                     \
+	{                                                      \
+		char lpstr[1024] = { 0 };                          \
+		ConvertWCharToUtf8(wstr, lpstr, ARRAYSIZE(lpstr)); \
+		WLog_DBG(TAG, msg, lpstr);                         \
 	} while (0)
 #else
 #define DEBUG_WSTR(msg, wstr) \
@@ -61,10 +58,14 @@
 	} while (0)
 #endif
 
-static void drive_file_fix_path(WCHAR* path)
+static BOOL drive_file_fix_path(WCHAR* path, size_t length)
 {
 	size_t i;
-	size_t length = _wcslen(path);
+
+	if ((length == 0) || (length > UINT32_MAX))
+		return FALSE;
+
+	WINPR_ASSERT(path);
 
 	for (i = 0; i < length; i++)
 	{
@@ -75,58 +76,81 @@ static void drive_file_fix_path(WCHAR* path)
 #ifdef WIN32
 
 	if ((length == 3) && (path[1] == L':') && (path[2] == L'/'))
-		return;
+		return FALSE;
 
 #else
 
 	if ((length == 1) && (path[0] == L'/'))
-		return;
+		return FALSE;
 
 #endif
 
 	if ((length > 0) && (path[length - 1] == L'/'))
 		path[length - 1] = L'\0';
+
+	return TRUE;
 }
 
 static WCHAR* drive_file_combine_fullpath(const WCHAR* base_path, const WCHAR* path,
-                                          size_t PathLength)
+                                          size_t PathWCharLength)
 {
-	WCHAR* fullpath;
-	size_t base_path_length;
+	BOOL ok = FALSE;
+	WCHAR* fullpath = NULL;
+	size_t length;
 
-	if (!base_path || (!path && (PathLength > 0)))
-		return NULL;
+	if (!base_path || (!path && (PathWCharLength > 0)))
+		goto fail;
 
-	base_path_length = _wcslen(base_path) * 2;
-	fullpath = (WCHAR*)calloc(1, base_path_length + PathLength + sizeof(WCHAR));
+	const size_t base_path_length = _wcsnlen(base_path, MAX_PATH);
+	length = base_path_length + PathWCharLength + 1;
+	fullpath = (WCHAR*)calloc(length, sizeof(WCHAR));
 
 	if (!fullpath)
+		goto fail;
+
+	CopyMemory(fullpath, base_path, base_path_length * sizeof(WCHAR));
+	if (path)
+		CopyMemory(&fullpath[base_path_length], path, PathWCharLength * sizeof(WCHAR));
+
+	if (!drive_file_fix_path(fullpath, length))
+		goto fail;
+
+	/* Ensure the path does not contain sequences like '..' */
+	const WCHAR dotdot[] = { '.', '.', '\0' };
+	if (_wcsstr(&fullpath[base_path_length], dotdot))
 	{
-		WLog_ERR(TAG, "malloc failed!");
-		return NULL;
+		char abuffer[MAX_PATH] = { 0 };
+		ConvertWCharToUtf8(&fullpath[base_path_length], abuffer, ARRAYSIZE(abuffer));
+
+		WLog_WARN(TAG, "[rdpdr] received invalid file path '%s' from server, aborting!",
+		          &abuffer[base_path_length]);
+		goto fail;
 	}
 
-	CopyMemory(fullpath, base_path, base_path_length);
-	if (path)
-		CopyMemory((char*)fullpath + base_path_length, path, PathLength);
-	drive_file_fix_path(fullpath);
+	ok = TRUE;
+fail:
+	if (!ok)
+	{
+		free(fullpath);
+		fullpath = NULL;
+	}
 	return fullpath;
 }
 
 static BOOL drive_file_remove_dir(const WCHAR* path)
 {
-	WIN32_FIND_DATAW findFileData;
+	WIN32_FIND_DATAW findFileData = { 0 };
 	BOOL ret = TRUE;
-	HANDLE dir;
-	WCHAR* fullpath;
-	WCHAR* path_slash;
-	size_t base_path_length;
+	HANDLE dir = INVALID_HANDLE_VALUE;
+	WCHAR* fullpath = NULL;
+	WCHAR* path_slash = NULL;
+	size_t base_path_length = 0;
 
 	if (!path)
 		return FALSE;
 
-	base_path_length = _wcslen(path) * 2;
-	path_slash = (WCHAR*)calloc(1, base_path_length + sizeof(WCHAR) * 3);
+	base_path_length = _wcslen(path);
+	path_slash = (WCHAR*)calloc(base_path_length + 3, sizeof(WCHAR));
 
 	if (!path_slash)
 	{
@@ -134,12 +158,11 @@ static BOOL drive_file_remove_dir(const WCHAR* path)
 		return FALSE;
 	}
 
-	CopyMemory(path_slash, path, base_path_length);
-	path_slash[base_path_length / 2] = L'/';
-	path_slash[base_path_length / 2 + 1] = L'*';
+	CopyMemory(path_slash, path, base_path_length * sizeof(WCHAR));
+	path_slash[base_path_length] = L'/';
+	path_slash[base_path_length + 1] = L'*';
 	DEBUG_WSTR("Search in %s", path_slash);
 	dir = FindFirstFileW(path_slash, &findFileData);
-	path_slash[base_path_length / 2 + 1] = 0;
 
 	if (dir == INVALID_HANDLE_VALUE)
 	{
@@ -149,7 +172,7 @@ static BOOL drive_file_remove_dir(const WCHAR* path)
 
 	do
 	{
-		size_t len = _wcslen(findFileData.cFileName);
+		const size_t len = _wcsnlen(findFileData.cFileName, ARRAYSIZE(findFileData.cFileName));
 
 		if ((len == 1 && findFileData.cFileName[0] == L'.') ||
 		    (len == 2 && findFileData.cFileName[0] == L'.' && findFileData.cFileName[1] == L'.'))
@@ -157,7 +180,7 @@ static BOOL drive_file_remove_dir(const WCHAR* path)
 			continue;
 		}
 
-		fullpath = drive_file_combine_fullpath(path_slash, findFileData.cFileName, len * 2);
+		fullpath = drive_file_combine_fullpath(path_slash, findFileData.cFileName, len);
 		DEBUG_WSTR("Delete %s", fullpath);
 
 		if (findFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
@@ -333,13 +356,13 @@ static BOOL drive_file_init(DRIVE_FILE* file)
 	return file->file_handle != INVALID_HANDLE_VALUE;
 }
 
-DRIVE_FILE* drive_file_new(const WCHAR* base_path, const WCHAR* path, UINT32 PathLength, UINT32 id,
-                           UINT32 DesiredAccess, UINT32 CreateDisposition, UINT32 CreateOptions,
-                           UINT32 FileAttributes, UINT32 SharedAccess)
+DRIVE_FILE* drive_file_new(const WCHAR* base_path, const WCHAR* path, UINT32 PathWCharLength,
+                           UINT32 id, UINT32 DesiredAccess, UINT32 CreateDisposition,
+                           UINT32 CreateOptions, UINT32 FileAttributes, UINT32 SharedAccess)
 {
 	DRIVE_FILE* file;
 
-	if (!base_path || (!path && (PathLength > 0)))
+	if (!base_path || (!path && (PathWCharLength > 0)))
 		return NULL;
 
 	file = (DRIVE_FILE*)calloc(1, sizeof(DRIVE_FILE));
@@ -359,7 +382,7 @@ DRIVE_FILE* drive_file_new(const WCHAR* base_path, const WCHAR* path, UINT32 Pat
 	file->CreateDisposition = CreateDisposition;
 	file->CreateOptions = CreateOptions;
 	file->SharedAccess = SharedAccess;
-	drive_file_set_fullpath(file, drive_file_combine_fullpath(base_path, path, PathLength));
+	drive_file_set_fullpath(file, drive_file_combine_fullpath(base_path, path, PathWCharLength));
 
 	if (!drive_file_init(file))
 	{
@@ -463,43 +486,28 @@ BOOL drive_file_write(DRIVE_FILE* file, BYTE* buffer, UINT32 Length)
 	return TRUE;
 }
 
-BOOL drive_file_query_information(DRIVE_FILE* file, UINT32 FsInformationClass, wStream* output)
+static BOOL drive_file_query_from_handle_information(const DRIVE_FILE* file,
+                                                     const BY_HANDLE_FILE_INFORMATION* info,
+                                                     UINT32 FsInformationClass, wStream* output)
 {
-	WIN32_FILE_ATTRIBUTE_DATA fileAttributes;
-	DEBUG_WSTR("FindFirstFile %s", file->fullpath);
-
-	if (!file || !output)
-		return FALSE;
-
-	if (!GetFileAttributesExW(file->fullpath, GetFileExInfoStandard, &fileAttributes))
-		goto out_fail;
-
 	switch (FsInformationClass)
 	{
 		case FileBasicInformation:
 
 			/* http://msdn.microsoft.com/en-us/library/cc232094.aspx */
 			if (!Stream_EnsureRemainingCapacity(output, 4 + 36))
-				goto out_fail;
+				return FALSE;
 
-			Stream_Write_UINT32(output, 36); /* Length */
-			Stream_Write_UINT32(output,
-			                    fileAttributes.ftCreationTime.dwLowDateTime); /* CreationTime */
-			Stream_Write_UINT32(output,
-			                    fileAttributes.ftCreationTime.dwHighDateTime); /* CreationTime */
-			Stream_Write_UINT32(output,
-			                    fileAttributes.ftLastAccessTime.dwLowDateTime); /* LastAccessTime */
-			Stream_Write_UINT32(
-			    output, fileAttributes.ftLastAccessTime.dwHighDateTime); /* LastAccessTime */
-			Stream_Write_UINT32(output,
-			                    fileAttributes.ftLastWriteTime.dwLowDateTime); /* LastWriteTime */
-			Stream_Write_UINT32(output,
-			                    fileAttributes.ftLastWriteTime.dwHighDateTime); /* LastWriteTime */
-			Stream_Write_UINT32(output,
-			                    fileAttributes.ftLastWriteTime.dwLowDateTime); /* ChangeTime */
-			Stream_Write_UINT32(output,
-			                    fileAttributes.ftLastWriteTime.dwHighDateTime); /* ChangeTime */
-			Stream_Write_UINT32(output, fileAttributes.dwFileAttributes);       /* FileAttributes */
+			Stream_Write_UINT32(output, 36);                                    /* Length */
+			Stream_Write_UINT32(output, info->ftCreationTime.dwLowDateTime);    /* CreationTime */
+			Stream_Write_UINT32(output, info->ftCreationTime.dwHighDateTime);   /* CreationTime */
+			Stream_Write_UINT32(output, info->ftLastAccessTime.dwLowDateTime);  /* LastAccessTime */
+			Stream_Write_UINT32(output, info->ftLastAccessTime.dwHighDateTime); /* LastAccessTime */
+			Stream_Write_UINT32(output, info->ftLastWriteTime.dwLowDateTime);   /* LastWriteTime */
+			Stream_Write_UINT32(output, info->ftLastWriteTime.dwHighDateTime);  /* LastWriteTime */
+			Stream_Write_UINT32(output, info->ftLastWriteTime.dwLowDateTime);   /* ChangeTime */
+			Stream_Write_UINT32(output, info->ftLastWriteTime.dwHighDateTime);  /* ChangeTime */
+			Stream_Write_UINT32(output, info->dwFileAttributes);                /* FileAttributes */
 			/* Reserved(4), MUST NOT be added! */
 			break;
 
@@ -507,16 +515,16 @@ BOOL drive_file_query_information(DRIVE_FILE* file, UINT32 FsInformationClass, w
 
 			/*  http://msdn.microsoft.com/en-us/library/cc232088.aspx */
 			if (!Stream_EnsureRemainingCapacity(output, 4 + 22))
-				goto out_fail;
+				return FALSE;
 
-			Stream_Write_UINT32(output, 22);                           /* Length */
-			Stream_Write_UINT32(output, fileAttributes.nFileSizeLow);  /* AllocationSize */
-			Stream_Write_UINT32(output, fileAttributes.nFileSizeHigh); /* AllocationSize */
-			Stream_Write_UINT32(output, fileAttributes.nFileSizeLow);  /* EndOfFile */
-			Stream_Write_UINT32(output, fileAttributes.nFileSizeHigh); /* EndOfFile */
-			Stream_Write_UINT32(output, 0);                            /* NumberOfLinks */
-			Stream_Write_UINT8(output, file->delete_pending ? 1 : 0);  /* DeletePending */
-			Stream_Write_UINT8(output, fileAttributes.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY
+			Stream_Write_UINT32(output, 22);                          /* Length */
+			Stream_Write_UINT32(output, info->nFileSizeLow);          /* AllocationSize */
+			Stream_Write_UINT32(output, info->nFileSizeHigh);         /* AllocationSize */
+			Stream_Write_UINT32(output, info->nFileSizeLow);          /* EndOfFile */
+			Stream_Write_UINT32(output, info->nFileSizeHigh);         /* EndOfFile */
+			Stream_Write_UINT32(output, info->nNumberOfLinks);        /* NumberOfLinks */
+			Stream_Write_UINT8(output, file->delete_pending ? 1 : 0); /* DeletePending */
+			Stream_Write_UINT8(output, info->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY
 			                               ? TRUE
 			                               : FALSE); /* Directory */
 			/* Reserved(2), MUST NOT be added! */
@@ -526,17 +534,119 @@ BOOL drive_file_query_information(DRIVE_FILE* file, UINT32 FsInformationClass, w
 
 			/* http://msdn.microsoft.com/en-us/library/cc232093.aspx */
 			if (!Stream_EnsureRemainingCapacity(output, 4 + 8))
-				goto out_fail;
+				return FALSE;
 
-			Stream_Write_UINT32(output, 8);                               /* Length */
-			Stream_Write_UINT32(output, fileAttributes.dwFileAttributes); /* FileAttributes */
-			Stream_Write_UINT32(output, 0);                               /* ReparseTag */
+			Stream_Write_UINT32(output, 8);                      /* Length */
+			Stream_Write_UINT32(output, info->dwFileAttributes); /* FileAttributes */
+			Stream_Write_UINT32(output, 0);                      /* ReparseTag */
 			break;
 
 		default:
 			/* Unhandled FsInformationClass */
-			goto out_fail;
+			return FALSE;
 	}
+
+	return TRUE;
+}
+
+static BOOL drive_file_query_from_attributes(const DRIVE_FILE* file,
+                                             const WIN32_FILE_ATTRIBUTE_DATA* attrib,
+                                             UINT32 FsInformationClass, wStream* output)
+{
+	switch (FsInformationClass)
+	{
+		case FileBasicInformation:
+
+			/* http://msdn.microsoft.com/en-us/library/cc232094.aspx */
+			if (!Stream_EnsureRemainingCapacity(output, 4 + 36))
+				return FALSE;
+
+			Stream_Write_UINT32(output, 36);                                    /* Length */
+			Stream_Write_UINT32(output, attrib->ftCreationTime.dwLowDateTime);  /* CreationTime */
+			Stream_Write_UINT32(output, attrib->ftCreationTime.dwHighDateTime); /* CreationTime */
+			Stream_Write_UINT32(output,
+			                    attrib->ftLastAccessTime.dwLowDateTime); /* LastAccessTime */
+			Stream_Write_UINT32(output,
+			                    attrib->ftLastAccessTime.dwHighDateTime);       /* LastAccessTime */
+			Stream_Write_UINT32(output, attrib->ftLastWriteTime.dwLowDateTime); /* LastWriteTime */
+			Stream_Write_UINT32(output, attrib->ftLastWriteTime.dwHighDateTime); /* LastWriteTime */
+			Stream_Write_UINT32(output, attrib->ftLastWriteTime.dwLowDateTime);  /* ChangeTime */
+			Stream_Write_UINT32(output, attrib->ftLastWriteTime.dwHighDateTime); /* ChangeTime */
+			Stream_Write_UINT32(output, attrib->dwFileAttributes); /* FileAttributes */
+			/* Reserved(4), MUST NOT be added! */
+			break;
+
+		case FileStandardInformation:
+
+			/*  http://msdn.microsoft.com/en-us/library/cc232088.aspx */
+			if (!Stream_EnsureRemainingCapacity(output, 4 + 22))
+				return FALSE;
+
+			Stream_Write_UINT32(output, 22);                          /* Length */
+			Stream_Write_UINT32(output, attrib->nFileSizeLow);        /* AllocationSize */
+			Stream_Write_UINT32(output, attrib->nFileSizeHigh);       /* AllocationSize */
+			Stream_Write_UINT32(output, attrib->nFileSizeLow);        /* EndOfFile */
+			Stream_Write_UINT32(output, attrib->nFileSizeHigh);       /* EndOfFile */
+			Stream_Write_UINT32(output, 0);                           /* NumberOfLinks */
+			Stream_Write_UINT8(output, file->delete_pending ? 1 : 0); /* DeletePending */
+			Stream_Write_UINT8(output, attrib->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY
+			                               ? TRUE
+			                               : FALSE); /* Directory */
+			/* Reserved(2), MUST NOT be added! */
+			break;
+
+		case FileAttributeTagInformation:
+
+			/* http://msdn.microsoft.com/en-us/library/cc232093.aspx */
+			if (!Stream_EnsureRemainingCapacity(output, 4 + 8))
+				return FALSE;
+
+			Stream_Write_UINT32(output, 8);                        /* Length */
+			Stream_Write_UINT32(output, attrib->dwFileAttributes); /* FileAttributes */
+			Stream_Write_UINT32(output, 0);                        /* ReparseTag */
+			break;
+
+		default:
+			/* Unhandled FsInformationClass */
+			return FALSE;
+	}
+
+	return TRUE;
+}
+
+BOOL drive_file_query_information(DRIVE_FILE* file, UINT32 FsInformationClass, wStream* output)
+{
+	BY_HANDLE_FILE_INFORMATION fileInformation = { 0 };
+	BOOL status;
+	HANDLE hFile;
+
+	if (!file || !output)
+		return FALSE;
+
+	hFile = CreateFileW(file->fullpath, 0, FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
+	                    FILE_ATTRIBUTE_NORMAL, NULL);
+	if (hFile != INVALID_HANDLE_VALUE)
+	{
+		status = GetFileInformationByHandle(hFile, &fileInformation);
+		CloseHandle(hFile);
+		if (!status)
+			goto out_fail;
+
+		if (!drive_file_query_from_handle_information(file, &fileInformation, FsInformationClass,
+		                                              output))
+			goto out_fail;
+
+		return TRUE;
+	}
+
+	/* If we failed before (i.e. if information for a drive is queried) fall back to
+	 * GetFileAttributesExW */
+	WIN32_FILE_ATTRIBUTE_DATA fileAttributes = { 0 };
+	if (!GetFileAttributesExW(file->fullpath, GetFileExInfoStandard, &fileAttributes))
+		goto out_fail;
+
+	if (!drive_file_query_from_attributes(file, &fileAttributes, FsInformationClass, output))
+		goto out_fail;
 
 	return TRUE;
 out_fail:
@@ -572,7 +682,7 @@ BOOL drive_file_set_information(DRIVE_FILE* file, UINT32 FsInformationClass, UIN
 	switch (FsInformationClass)
 	{
 		case FileBasicInformation:
-			if (Stream_GetRemainingLength(input) < 36)
+			if (!Stream_CheckAndLogRequiredLength(TAG, input, 36))
 				return FALSE;
 
 			/* http://msdn.microsoft.com/en-us/library/cc232094.aspx */
@@ -636,7 +746,7 @@ BOOL drive_file_set_information(DRIVE_FILE* file, UINT32 FsInformationClass, UIN
 
 		/* http://msdn.microsoft.com/en-us/library/cc232067.aspx */
 		case FileAllocationInformation:
-			if (Stream_GetRemainingLength(input) < 8)
+			if (!Stream_CheckAndLogRequiredLength(TAG, input, 8))
 				return FALSE;
 
 			/* http://msdn.microsoft.com/en-us/library/cc232076.aspx */
@@ -653,8 +763,8 @@ BOOL drive_file_set_information(DRIVE_FILE* file, UINT32 FsInformationClass, UIN
 
 			if (!SetFilePointerEx(file->file_handle, liSize, NULL, FILE_BEGIN))
 			{
-				WLog_ERR(TAG, "Unable to truncate %s to %d (%" PRId32 ")", file->fullpath, size,
-				         GetLastError());
+				WLog_ERR(TAG, "Unable to truncate %s to %" PRId64 " (%" PRId32 ")", file->fullpath,
+				         size, GetLastError());
 				return FALSE;
 			}
 
@@ -662,8 +772,8 @@ BOOL drive_file_set_information(DRIVE_FILE* file, UINT32 FsInformationClass, UIN
 
 			if (SetEndOfFile(file->file_handle) == 0)
 			{
-				WLog_ERR(TAG, "Unable to truncate %s to %d (%" PRId32 ")", file->fullpath, size,
-				         GetLastError());
+				WLog_ERR(TAG, "Unable to truncate %s to %" PRId64 " (%" PRId32 ")", file->fullpath,
+				         size, GetLastError());
 				return FALSE;
 			}
 
@@ -678,7 +788,7 @@ BOOL drive_file_set_information(DRIVE_FILE* file, UINT32 FsInformationClass, UIN
 
 			if (Length)
 			{
-				if (Stream_GetRemainingLength(input) < 1)
+				if (!Stream_CheckAndLogRequiredLength(TAG, input, 1))
 					return FALSE;
 
 				Stream_Read_UINT8(input, delete_pending);
@@ -702,7 +812,7 @@ BOOL drive_file_set_information(DRIVE_FILE* file, UINT32 FsInformationClass, UIN
 			break;
 
 		case FileRenameInformation:
-			if (Stream_GetRemainingLength(input) < 6)
+			if (!Stream_CheckAndLogRequiredLength(TAG, input, 6))
 				return FALSE;
 
 			/* http://msdn.microsoft.com/en-us/library/cc232085.aspx */
@@ -710,17 +820,14 @@ BOOL drive_file_set_information(DRIVE_FILE* file, UINT32 FsInformationClass, UIN
 			Stream_Seek_UINT8(input); /* RootDirectory */
 			Stream_Read_UINT32(input, FileNameLength);
 
-			if (Stream_GetRemainingLength(input) < FileNameLength)
+			if (!Stream_CheckAndLogRequiredLength(TAG, input, FileNameLength))
 				return FALSE;
 
 			fullpath = drive_file_combine_fullpath(file->basepath, (WCHAR*)Stream_Pointer(input),
-			                                       FileNameLength);
+			                                       FileNameLength / sizeof(WCHAR));
 
 			if (!fullpath)
-			{
-				WLog_ERR(TAG, "drive_file_combine_fullpath failed!");
 				return FALSE;
-			}
 
 #ifdef _WIN32
 
@@ -759,7 +866,7 @@ BOOL drive_file_set_information(DRIVE_FILE* file, UINT32 FsInformationClass, UIN
 }
 
 BOOL drive_file_query_directory(DRIVE_FILE* file, UINT32 FsInformationClass, BYTE InitialQuery,
-                                const WCHAR* path, UINT32 PathLength, wStream* output)
+                                const WCHAR* path, UINT32 PathWCharLength, wStream* output)
 {
 	size_t length;
 	WCHAR* ent_path;
@@ -773,7 +880,7 @@ BOOL drive_file_query_directory(DRIVE_FILE* file, UINT32 FsInformationClass, BYT
 		if (file->find_handle != INVALID_HANDLE_VALUE)
 			FindClose(file->find_handle);
 
-		ent_path = drive_file_combine_fullpath(file->basepath, path, PathLength);
+		ent_path = drive_file_combine_fullpath(file->basepath, path, PathWCharLength);
 		/* open new search handle and retrieve the first entry */
 		file->find_handle = FindFirstFileW(ent_path, &file->find_data);
 		free(ent_path);

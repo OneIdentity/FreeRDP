@@ -20,9 +20,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <stdarg.h>
 #include <unistd.h>
@@ -36,6 +34,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
+#include <winpr/assert.h>
 #include <winpr/thread.h>
 #include <winpr/crt.h>
 #include <winpr/string.h>
@@ -52,8 +51,11 @@
 #include "xf_input.h"
 #endif
 
+#include "xf_gfx.h"
 #include "xf_rail.h"
 #include "xf_input.h"
+#include "xf_keyboard.h"
+#include "xf_utils.h"
 
 #define TAG CLIENT_TAG("x11")
 
@@ -66,7 +68,7 @@
 	} while (0)
 #endif
 
-#include "FreeRDP_Icon_256px.h"
+#include <FreeRDP_Icon_256px.h>
 #define xf_icon_prop FreeRDP_Icon_256px_prop
 
 #include "xf_window.h"
@@ -98,24 +100,26 @@
 
 #define PROP_MOTIF_WM_HINTS_ELEMENTS 5
 
-struct _PropMotifWmHints
+typedef struct
 {
 	unsigned long flags;
 	unsigned long functions;
 	unsigned long decorations;
 	long inputMode;
 	unsigned long status;
-};
-typedef struct _PropMotifWmHints PropMotifWmHints;
+} PropMotifWmHints;
 
 static void xf_SetWindowTitleText(xfContext* xfc, Window window, const char* name)
 {
+	WINPR_ASSERT(xfc);
+	WINPR_ASSERT(name);
+
 	const size_t i = strnlen(name, MAX_PATH);
 	XStoreName(xfc->display, window, name);
 	Atom wm_Name = xfc->_NET_WM_NAME;
 	Atom utf8Str = xfc->UTF8_STRING;
-	XChangeProperty(xfc->display, window, wm_Name, utf8Str, 8, PropModeReplace,
-	                (const unsigned char*)name, (int)i);
+	LogTagAndXChangeProperty(TAG, xfc->display, window, wm_Name, utf8Str, 8, PropModeReplace,
+	                         (const unsigned char*)name, (int)i);
 }
 
 /**
@@ -156,10 +160,16 @@ void xf_SetWindowMinimized(xfContext* xfc, xfWindow* window)
 void xf_SetWindowFullscreen(xfContext* xfc, xfWindow* window, BOOL fullscreen)
 {
 	UINT32 i;
-	rdpSettings* settings = xfc->context.settings;
+	const rdpSettings* settings;
 	int startX, startY;
 	UINT32 width = window->width;
 	UINT32 height = window->height;
+
+	WINPR_ASSERT(xfc);
+
+	settings = xfc->common.context.settings;
+	WINPR_ASSERT(settings);
+
 	/* xfc->decorations is set by caller depending on settings and whether it is fullscreen or not
 	 */
 	window->decorations = xfc->decorations;
@@ -190,21 +200,21 @@ void xf_SetWindowFullscreen(xfContext* xfc, xfWindow* window, BOOL fullscreen)
 	if (fullscreen)
 	{
 		/* Initialize startX and startY with reasonable values */
-		startX = xfc->context.settings->MonitorDefArray[0].x;
-		startY = xfc->context.settings->MonitorDefArray[0].y;
+		startX = settings->MonitorDefArray[0].x;
+		startY = settings->MonitorDefArray[0].y;
 
 		/* Search all monitors to find the lowest startX and startY values */
-		for (i = 0; i < xfc->context.settings->MonitorCount; i++)
+		for (i = 0; i < settings->MonitorCount; i++)
 		{
-			startX = MIN(startX, xfc->context.settings->MonitorDefArray[i].x);
-			startY = MIN(startY, xfc->context.settings->MonitorDefArray[i].y);
+			startX = MIN(startX, settings->MonitorDefArray[i].x);
+			startY = MIN(startY, settings->MonitorDefArray[i].y);
 		}
 
 		/* Lastly apply any monitor shift(translation from remote to local coordinate system)
 		 *  to startX and startY values
 		 */
-		startX += xfc->context.settings->MonitorLocalShiftX;
-		startY += xfc->context.settings->MonitorLocalShiftY;
+		startX += settings->MonitorLocalShiftX;
+		startY += settings->MonitorLocalShiftY;
 	}
 
 	/*
@@ -345,22 +355,23 @@ void xf_SetWindowFullscreen(xfContext* xfc, xfWindow* window, BOOL fullscreen)
 BOOL xf_GetWindowProperty(xfContext* xfc, Window window, Atom property, int length,
                           unsigned long* nitems, unsigned long* bytes, BYTE** prop)
 {
-	int status;
-	Atom actual_type;
-	int actual_format;
+	int status = 0;
+	Atom actual_type = None;
+	int actual_format = 0;
 
 	if (property == None)
 		return FALSE;
 
-	status = XGetWindowProperty(xfc->display, window, property, 0, length, False, AnyPropertyType,
-	                            &actual_type, &actual_format, nitems, bytes, prop);
+	status = LogTagAndXGetWindowProperty(TAG, xfc->display, window, property, 0, length, False,
+	                                     AnyPropertyType, &actual_type, &actual_format, nitems,
+	                                     bytes, prop);
 
 	if (status != Success)
 		return FALSE;
 
 	if (actual_type == None)
 	{
-		WLog_INFO(TAG, "Property %lu does not exist", (unsigned long)property);
+		WLog_DBG(TAG, "Property %lu does not exist", (unsigned long)property);
 		return FALSE;
 	}
 
@@ -419,35 +430,35 @@ BOOL xf_GetWorkArea(xfContext* xfc)
 
 void xf_SetWindowDecorations(xfContext* xfc, Window window, BOOL show)
 {
-	PropMotifWmHints hints;
-	hints.decorations = (show) ? MWM_DECOR_ALL : 0;
-	hints.functions = MWM_FUNC_ALL;
-	hints.flags = MWM_HINTS_DECORATIONS | MWM_HINTS_FUNCTIONS;
-	hints.inputMode = 0;
-	hints.status = 0;
-	XChangeProperty(xfc->display, window, xfc->_MOTIF_WM_HINTS, xfc->_MOTIF_WM_HINTS, 32,
-	                PropModeReplace, (BYTE*)&hints, PROP_MOTIF_WM_HINTS_ELEMENTS);
+	PropMotifWmHints hints = { .decorations = (show) ? MWM_DECOR_ALL : 0,
+		                       .functions = MWM_FUNC_ALL,
+		                       .flags = MWM_HINTS_DECORATIONS | MWM_HINTS_FUNCTIONS,
+		                       .inputMode = 0,
+		                       .status = 0 };
+	WINPR_ASSERT(xfc);
+	LogTagAndXChangeProperty(TAG, xfc->display, window, xfc->_MOTIF_WM_HINTS, xfc->_MOTIF_WM_HINTS,
+	                         32, PropModeReplace, (BYTE*)&hints, PROP_MOTIF_WM_HINTS_ELEMENTS);
 }
 
 void xf_SetWindowUnlisted(xfContext* xfc, Window window)
 {
-	Atom window_state[2];
-	window_state[0] = xfc->_NET_WM_STATE_SKIP_PAGER;
-	window_state[1] = xfc->_NET_WM_STATE_SKIP_TASKBAR;
-	XChangeProperty(xfc->display, window, xfc->_NET_WM_STATE, XA_ATOM, 32, PropModeReplace,
-	                (BYTE*)&window_state, 2);
+	WINPR_ASSERT(xfc);
+	const Atom window_state[] = { xfc->_NET_WM_STATE_SKIP_PAGER, xfc->_NET_WM_STATE_SKIP_TASKBAR };
+	LogTagAndXChangeProperty(TAG, xfc->display, window, xfc->_NET_WM_STATE, XA_ATOM, 32,
+	                         PropModeReplace, (BYTE*)&window_state, 2);
 }
 
 static void xf_SetWindowPID(xfContext* xfc, Window window, pid_t pid)
 {
 	Atom am_wm_pid;
 
+	WINPR_ASSERT(xfc);
 	if (!pid)
 		pid = getpid();
 
 	am_wm_pid = xfc->_NET_WM_PID;
-	XChangeProperty(xfc->display, window, am_wm_pid, XA_CARDINAL, 32, PropModeReplace, (BYTE*)&pid,
-	                1);
+	LogTagAndXChangeProperty(TAG, xfc->display, window, am_wm_pid, XA_CARDINAL, 32, PropModeReplace,
+	                         (BYTE*)&pid, 1);
 }
 
 static const char* get_shm_id(void)
@@ -459,7 +470,9 @@ static const char* get_shm_id(void)
 
 Window xf_CreateDummyWindow(xfContext* xfc)
 {
-	return XCreateSimpleWindow(xfc->display, DefaultRootWindow(xfc->display), 0, 0, 1, 1, 0, 0, 0);
+	return XCreateWindow(xfc->display, RootWindowOfScreen(xfc->screen), xfc->workArea.x,
+	                     xfc->workArea.y, 1, 1, 0, xfc->depth, InputOutput, xfc->visual,
+	                     xfc->attribs_mask, &xfc->attribs);
 }
 
 void xf_DestroyDummyWindow(xfContext* xfc, Window window)
@@ -481,19 +494,21 @@ xfWindow* xf_CreateDesktopWindow(xfContext* xfc, char* name, int width, int heig
 	if (!window)
 		return NULL;
 
-	settings = xfc->context.settings;
-	parentWindow = (Window)xfc->context.settings->ParentWindowId;
+	settings = xfc->common.context.settings;
+	WINPR_ASSERT(settings);
+
+	parentWindow = (Window)settings->ParentWindowId;
 	window->width = width;
 	window->height = height;
 	window->decorations = xfc->decorations;
 	window->is_mapped = FALSE;
 	window->is_transient = FALSE;
-	window->handle = XCreateWindow(xfc->display, RootWindowOfScreen(xfc->screen), xfc->workArea.x,
-	                               xfc->workArea.y, xfc->workArea.width, xfc->workArea.height, 0,
-	                               xfc->depth, InputOutput, xfc->visual,
-	                               CWBackPixel | CWBackingStore | CWOverrideRedirect | CWColormap |
-	                                   CWBorderPixel | CWWinGravity | CWBitGravity,
-	                               &xfc->attribs);
+
+	WINPR_ASSERT(xfc->depth != 0);
+	window->handle =
+	    XCreateWindow(xfc->display, RootWindowOfScreen(xfc->screen), xfc->workArea.x,
+	                  xfc->workArea.y, xfc->workArea.width, xfc->workArea.height, 0, xfc->depth,
+	                  InputOutput, xfc->visual, xfc->attribs_mask, &xfc->attribs);
 	window->shmid = shm_open(get_shm_id(), (O_CREAT | O_RDWR), (S_IREAD | S_IWRITE));
 
 	if (window->shmid < 0)
@@ -505,7 +520,7 @@ xfWindow* xf_CreateDesktopWindow(xfContext* xfc, char* name, int width, int heig
 		int rc = ftruncate(window->shmid, sizeof(window->handle));
 		if (rc != 0)
 		{
-			DEBUG_X11("%s: ftruncate failed with %s [%d]", __FUNCTION__, strerror(rc), rc);
+			DEBUG_X11("ftruncate failed with %s [%d]", strerror(rc), rc);
 		}
 		else
 		{
@@ -532,8 +547,8 @@ xfWindow* xf_CreateDesktopWindow(xfContext* xfc, char* name, int width, int heig
 	{
 		classHints->res_name = "xfreerdp";
 
-		if (xfc->context.settings->WmClass)
-			classHints->res_class = xfc->context.settings->WmClass;
+		if (settings->WmClass)
+			classHints->res_class = settings->WmClass;
 		else
 			classHints->res_class = "xfreerdp";
 
@@ -551,8 +566,8 @@ xfWindow* xf_CreateDesktopWindow(xfContext* xfc, char* name, int width, int heig
 	if (xfc->grab_keyboard)
 		input_mask |= EnterWindowMask | LeaveWindowMask;
 
-	XChangeProperty(xfc->display, window->handle, xfc->_NET_WM_ICON, XA_CARDINAL, 32,
-	                PropModeReplace, (BYTE*)xf_icon_prop, ARRAYSIZE(xf_icon_prop));
+	LogTagAndXChangeProperty(TAG, xfc->display, window->handle, xfc->_NET_WM_ICON, XA_CARDINAL, 32,
+	                         PropModeReplace, (BYTE*)xf_icon_prop, ARRAYSIZE(xf_icon_prop));
 
 	if (parentWindow)
 		XReparentWindow(xfc->display, window->handle, parentWindow, 0, 0);
@@ -577,7 +592,7 @@ xfWindow* xf_CreateDesktopWindow(xfContext* xfc, char* name, int width, int heig
 	 * monitor instead of the upper-left monitor for remote app mode (which uses all monitors).
 	 * This extra call after the window is mapped will position the login window correctly
 	 */
-	if (xfc->context.settings->RemoteApplicationMode)
+	if (settings->RemoteApplicationMode)
 	{
 		XMoveWindow(xfc->display, window->handle, 0, 0);
 	}
@@ -586,7 +601,8 @@ xfWindow* xf_CreateDesktopWindow(xfContext* xfc, char* name, int width, int heig
 		XMoveWindow(xfc->display, window->handle, settings->DesktopPosX, settings->DesktopPosY);
 	}
 
-	window->floatbar = xf_floatbar_new(xfc, window->handle, name, settings->Floatbar);
+	window->floatbar = xf_floatbar_new(xfc, window->handle, name,
+	                                   freerdp_settings_get_uint32(settings, FreeRDP_Floatbar));
 
 	if (xfc->_XWAYLAND_MAY_GRAB_KEYBOARD)
 		xf_SendClientEvent(xfc, window->handle, xfc->_XWAYLAND_MAY_GRAB_KEYBOARD, 1, 1);
@@ -602,7 +618,8 @@ void xf_ResizeDesktopWindow(xfContext* xfc, xfWindow* window, int width, int hei
 	if (!xfc || !window)
 		return;
 
-	settings = xfc->context.settings;
+	settings = xfc->common.context.settings;
+	WINPR_ASSERT(settings);
 
 	if (!(size_hints = XAllocSizeHints()))
 		return;
@@ -708,8 +725,8 @@ void xf_SetWindowStyle(xfContext* xfc, xfAppWindow* appWindow, UINT32 style, UIN
 		XChangeWindowAttributes(xfc->display, appWindow->handle, CWOverrideRedirect, &attrs);
 	}
 
-	XChangeProperty(xfc->display, appWindow->handle, xfc->_NET_WM_WINDOW_TYPE, XA_ATOM, 32,
-	                PropModeReplace, (BYTE*)&window_type, 1);
+	LogTagAndXChangeProperty(TAG, xfc->display, appWindow->handle, xfc->_NET_WM_WINDOW_TYPE,
+	                         XA_ATOM, 32, PropModeReplace, (BYTE*)&window_type, 1);
 }
 
 void xf_SetWindowText(xfContext* xfc, xfAppWindow* appWindow, const char* name)
@@ -774,39 +791,57 @@ int xf_AppWindowInit(xfContext* xfc, xfAppWindow* appWindow)
 	return 1;
 }
 
-int xf_AppWindowCreate(xfContext* xfc, xfAppWindow* appWindow)
+BOOL xf_AppWindowCreate(xfContext* xfc, xfAppWindow* appWindow)
 {
-	XGCValues gcv;
+	XGCValues gcv = { 0 };
 	int input_mask;
 	XWMHints* InputModeHint;
 	XClassHint* class_hints;
+	const rdpSettings* settings;
+
+	WINPR_ASSERT(xfc);
+	WINPR_ASSERT(appWindow);
+
+	settings = xfc->common.context.settings;
+	WINPR_ASSERT(settings);
+
 	xf_FixWindowCoordinates(xfc, &appWindow->x, &appWindow->y, &appWindow->width,
 	                        &appWindow->height);
+	appWindow->shmid = -1;
 	appWindow->decorations = FALSE;
 	appWindow->fullscreen = FALSE;
 	appWindow->local_move.state = LMS_NOT_ACTIVE;
 	appWindow->is_mapped = FALSE;
 	appWindow->is_transient = FALSE;
 	appWindow->rail_state = 0;
+	appWindow->maxVert = FALSE;
+	appWindow->maxHorz = FALSE;
+	appWindow->minimized = FALSE;
 	appWindow->rail_ignore_configure = FALSE;
-	appWindow->handle = XCreateWindow(xfc->display, RootWindowOfScreen(xfc->screen), appWindow->x,
-	                                  appWindow->y, appWindow->width, appWindow->height, 0,
-	                                  xfc->depth, InputOutput, xfc->visual, 0, &xfc->attribs);
+
+	WINPR_ASSERT(xfc->depth != 0);
+	appWindow->handle =
+	    XCreateWindow(xfc->display, RootWindowOfScreen(xfc->screen), appWindow->x, appWindow->y,
+	                  appWindow->width, appWindow->height, 0, xfc->depth, InputOutput, xfc->visual,
+	                  xfc->attribs_mask, &xfc->attribs);
 
 	if (!appWindow->handle)
-		return -1;
+		return FALSE;
 
-	ZeroMemory(&gcv, sizeof(gcv));
 	appWindow->gc = XCreateGC(xfc->display, appWindow->handle, GCGraphicsExposures, &gcv);
+
+	if (!xf_AppWindowResize(xfc, appWindow))
+		return FALSE;
+
 	class_hints = XAllocClassHint();
 
 	if (class_hints)
 	{
 		char* class = NULL;
 
-		if (xfc->context.settings->WmClass)
+		if (settings->WmClass)
 		{
-			class_hints->res_class = xfc->context.settings->WmClass;
+			class_hints->res_class = settings->WmClass;
 		}
 		else
 		{
@@ -839,7 +874,7 @@ int xf_AppWindowCreate(xfContext* xfc, xfAppWindow* appWindow)
 	if (xfc->_XWAYLAND_MAY_GRAB_KEYBOARD)
 		xf_SendClientEvent(xfc, appWindow->handle, xfc->_XWAYLAND_MAY_GRAB_KEYBOARD, 1, 1);
 
-	return 1;
+	return TRUE;
 }
 
 void xf_SetWindowMinMaxInfo(xfContext* xfc, xfAppWindow* appWindow, int maxWidth, int maxHeight,
@@ -876,7 +911,9 @@ void xf_StartLocalMoveSize(xfContext* xfc, xfAppWindow* appWindow, int direction
 	appWindow->local_move.root_y = y;
 	appWindow->local_move.state = LMS_STARTING;
 	appWindow->local_move.direction = direction;
-	XUngrabPointer(xfc->display, CurrentTime);
+
+	xf_ungrab(xfc);
+
 	xf_SendClientEvent(
 	    xfc, appWindow->handle,
 	    xfc->_NET_WM_MOVERESIZE, /* request X window manager to initiate a local move */
@@ -943,6 +980,9 @@ void xf_MoveWindow(xfContext* xfc, xfAppWindow* appWindow, int x, int y, int wid
 
 void xf_ShowWindow(xfContext* xfc, xfAppWindow* appWindow, BYTE state)
 {
+	WINPR_ASSERT(xfc);
+	WINPR_ASSERT(appWindow);
+
 	switch (state)
 	{
 		case WINDOW_HIDE:
@@ -950,11 +990,14 @@ void xf_ShowWindow(xfContext* xfc, xfAppWindow* appWindow, BYTE state)
 			break;
 
 		case WINDOW_SHOW_MINIMIZED:
+			appWindow->minimized = TRUE;
 			XIconifyWindow(xfc->display, appWindow->handle, xfc->screen_number);
 			break;
 
 		case WINDOW_SHOW_MAXIMIZED:
 			/* Set the window as maximized */
+			appWindow->maxHorz = TRUE;
+			appWindow->maxVert = TRUE;
 			xf_SendClientEvent(xfc, appWindow->handle, xfc->_NET_WM_STATE, 4, _NET_WM_STATE_ADD,
 			                   xfc->_NET_WM_STATE_MAXIMIZED_VERT, xfc->_NET_WM_STATE_MAXIMIZED_HORZ,
 			                   0);
@@ -1057,6 +1100,12 @@ void xf_UpdateWindowArea(xfContext* xfc, xfAppWindow* appWindow, int x, int y, i
                          int height)
 {
 	int ax, ay;
+	const rdpSettings* settings;
+
+	WINPR_ASSERT(xfc);
+
+	settings = xfc->common.context.settings;
+	WINPR_ASSERT(settings);
 
 	if (appWindow == NULL)
 		return;
@@ -1075,16 +1124,27 @@ void xf_UpdateWindowArea(xfContext* xfc, xfAppWindow* appWindow, int x, int y, i
 
 	xf_lock_x11(xfc);
 
-	if (xfc->context.settings->SoftwareGdi)
+	if (settings->SoftwareGdi)
 	{
-		XPutImage(xfc->display, xfc->primary, appWindow->gc, xfc->image, ax, ay, ax, ay, width,
+		XPutImage(xfc->display, appWindow->pixmap, appWindow->gc, xfc->image, ax, ay, x, y, width,
 		          height);
 	}
 
-	XCopyArea(xfc->display, xfc->primary, appWindow->handle, appWindow->gc, ax, ay, width, height,
-	          x, y);
+	XCopyArea(xfc->display, appWindow->pixmap, appWindow->handle, appWindow->gc, x, y, width,
+	          height, x, y);
 	XFlush(xfc->display);
 	xf_unlock_x11(xfc);
+}
+
+static void xf_AppWindowDestroyImage(xfAppWindow* appWindow)
+{
+	WINPR_ASSERT(appWindow);
+	if (appWindow->image)
+	{
+		appWindow->image->data = NULL;
+		XDestroyImage(appWindow->image);
+		appWindow->image = NULL;
+	}
 }
 
 void xf_DestroyWindow(xfContext* xfc, xfAppWindow* appWindow)
@@ -1097,6 +1157,11 @@ void xf_DestroyWindow(xfContext* xfc, xfAppWindow* appWindow)
 
 	if (appWindow->gc)
 		XFreeGC(xfc->display, appWindow->gc);
+
+	if (appWindow->pixmap)
+		XFreePixmap(xfc->display, appWindow->pixmap);
+
+	xf_AppWindowDestroyImage(appWindow);
 
 	if (appWindow->handle)
 	{
@@ -1121,15 +1186,19 @@ void xf_DestroyWindow(xfContext* xfc, xfAppWindow* appWindow)
 
 xfAppWindow* xf_AppWindowFromX11Window(xfContext* xfc, Window wnd)
 {
-	int index;
-	int count;
+	size_t index;
+	size_t count;
 	ULONG_PTR* pKeys = NULL;
-	xfAppWindow* appWindow;
+
+	WINPR_ASSERT(xfc);
+	if (!xfc->railWindows)
+		return NULL;
+
 	count = HashTable_GetKeys(xfc->railWindows, &pKeys);
 
 	for (index = 0; index < count; index++)
 	{
-		appWindow = xf_rail_get_window(xfc, *(UINT64*)pKeys[index]);
+		xfAppWindow* appWindow = xf_rail_get_window(xfc, *(UINT64*)pKeys[index]);
 
 		if (!appWindow)
 		{
@@ -1146,4 +1215,99 @@ xfAppWindow* xf_AppWindowFromX11Window(xfContext* xfc, Window wnd)
 
 	free(pKeys);
 	return NULL;
+}
+
+UINT xf_AppUpdateWindowFromSurface(xfContext* xfc, gdiGfxSurface* surface)
+{
+	XImage* image = NULL;
+	UINT rc = ERROR_INTERNAL_ERROR;
+
+	WINPR_ASSERT(xfc);
+	WINPR_ASSERT(surface);
+
+	xfAppWindow* appWindow = xf_rail_get_window(xfc, surface->windowId);
+	if (!appWindow)
+	{
+		WLog_VRB(TAG, "Failed to find a window for id=0x%08" PRIx64, surface->windowId);
+		return CHANNEL_RC_OK;
+	}
+
+	const BOOL swGdi = freerdp_settings_get_bool(xfc->common.context.settings, FreeRDP_SoftwareGdi);
+	UINT32 nrects = 0;
+	const RECTANGLE_16* rects = region16_rects(&surface->invalidRegion, &nrects);
+
+	xf_lock_x11(xfc);
+	if (swGdi)
+	{
+		if (appWindow->surfaceId != surface->surfaceId)
+		{
+			xf_AppWindowDestroyImage(appWindow);
+			appWindow->surfaceId = surface->surfaceId;
+		}
+		if (appWindow->width != (INT64)surface->width)
+			xf_AppWindowDestroyImage(appWindow);
+		if (appWindow->height != (INT64)surface->height)
+			xf_AppWindowDestroyImage(appWindow);
+
+		if (!appWindow->image)
+		{
+			WINPR_ASSERT(xfc->depth != 0);
+			appWindow->image = XCreateImage(xfc->display, xfc->visual, xfc->depth, ZPixmap, 0,
+			                                (char*)surface->data, surface->width, surface->height,
+			                                xfc->scanline_pad, surface->scanline);
+			if (!appWindow->image)
+			{
+				WLog_WARN(TAG,
+				          "Failed create a XImage[%" PRIu32 "x%" PRIu32 ", scanline=%" PRIu32
+				          ", bpp=%" PRIu32 "] for window id=0x%08" PRIx64,
+				          surface->width, surface->height, surface->scanline, xfc->depth,
+				          surface->windowId);
+				goto fail;
+			}
+			appWindow->image->byte_order = LSBFirst;
+			appWindow->image->bitmap_bit_order = LSBFirst;
+		}
+
+		image = appWindow->image;
+	}
+	else
+	{
+		xfGfxSurface* xfSurface = (xfGfxSurface*)surface;
+		image = xfSurface->image;
+	}
+
+	for (UINT32 x = 0; x < nrects; x++)
+	{
+		const RECTANGLE_16* rect = &rects[x];
+		const UINT32 width = rect->right - rect->left;
+		const UINT32 height = rect->bottom - rect->top;
+
+		XPutImage(xfc->display, appWindow->pixmap, appWindow->gc, image, rect->left, rect->top,
+		          rect->left, rect->top, width, height);
+
+		XCopyArea(xfc->display, appWindow->pixmap, appWindow->handle, appWindow->gc, rect->left,
+		          rect->top, width, height, rect->left, rect->top);
+	}
+
+	rc = CHANNEL_RC_OK;
+fail:
+	XFlush(xfc->display);
+	xf_unlock_x11(xfc);
+	return rc;
+}
+
+BOOL xf_AppWindowResize(xfContext* xfc, xfAppWindow* appWindow)
+{
+	WINPR_ASSERT(xfc);
+	WINPR_ASSERT(appWindow);
+
+	if (appWindow->pixmap != 0)
+		XFreePixmap(xfc->display, appWindow->pixmap);
+
+	WINPR_ASSERT(xfc->depth != 0);
+	appWindow->pixmap =
+	    XCreatePixmap(xfc->display, xfc->drawable, appWindow->width, appWindow->height, xfc->depth);
+	xf_AppWindowDestroyImage(appWindow);
+
+	return appWindow->pixmap != 0;
 }

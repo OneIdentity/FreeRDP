@@ -2,7 +2,9 @@
 #include <winpr/path.h>
 #include <winpr/crypto.h>
 #include <winpr/pipe.h>
+
 #include <freerdp/freerdp.h>
+#include <freerdp/gdi/gdi.h>
 #include <freerdp/client/cmdline.h>
 
 static HANDLE s_sync = NULL;
@@ -10,18 +12,29 @@ static HANDLE s_sync = NULL;
 static int runInstance(int argc, char* argv[], freerdp** inst, DWORD timeout)
 {
 	int rc = -1;
-	RDP_CLIENT_ENTRY_POINTS clientEntryPoints;
-	ZeroMemory(&clientEntryPoints, sizeof(RDP_CLIENT_ENTRY_POINTS));
+	RDP_CLIENT_ENTRY_POINTS clientEntryPoints = { 0 };
+	rdpContext* context;
+
 	clientEntryPoints.Size = sizeof(RDP_CLIENT_ENTRY_POINTS);
 	clientEntryPoints.Version = RDP_CLIENT_INTERFACE_VERSION;
 	clientEntryPoints.ContextSize = sizeof(rdpContext);
-	rdpContext* context = freerdp_client_context_new(&clientEntryPoints);
+	context = freerdp_client_context_new(&clientEntryPoints);
 
 	if (!context)
 		goto finish;
 
 	if (inst)
 		*inst = context->instance;
+
+	context->instance->ChooseSmartcard = NULL;
+	context->instance->PresentGatewayMessage = NULL;
+	context->instance->LogonErrorInfo = NULL;
+	context->instance->AuthenticateEx = NULL;
+	context->instance->VerifyCertificateEx = NULL;
+	context->instance->VerifyChangedCertificateEx = NULL;
+
+	if (!freerdp_settings_set_bool(context->settings, FreeRDP_DeactivateClientDecoding, TRUE))
+		return FALSE;
 
 	if (freerdp_client_settings_parse_command_line(context->settings, argc, argv, FALSE) < 0)
 		goto finish;
@@ -51,12 +64,14 @@ static int runInstance(int argc, char* argv[], freerdp** inst, DWORD timeout)
 	rc = 0;
 finish:
 	freerdp_client_context_free(context);
+	if (inst)
+		*inst = NULL;
 	return rc;
 }
 
 static int testTimeout(int port)
 {
-    const DWORD timeout = 200;
+	const DWORD timeout = 200;
 	DWORD start, end, diff;
 	char arg1[] = "/v:192.0.2.1:XXXXX";
 	char* argv[] = { "test", "/v:192.0.2.1:XXXXX" };
@@ -131,15 +146,17 @@ static int testAbort(int port)
 
 	WaitForSingleObject(s_sync, INFINITE);
 	Sleep(100); /* Wait until freerdp_connect has been called */
-	freerdp_abort_connect(instance);
-	status = WaitForSingleObject(instance->context->abortEvent, 0);
-
-	if (status != WAIT_OBJECT_0)
+	if (instance)
 	{
-		CloseHandle(s_sync);
-		CloseHandle(thread);
-		s_sync = NULL;
-		return -1;
+		freerdp_abort_connect_context(instance->context);
+
+		if (!freerdp_shall_disconnect_context(instance->context))
+		{
+			CloseHandle(s_sync);
+			CloseHandle(thread);
+			s_sync = NULL;
+			return -1;
+		}
 	}
 
 	status = WaitForSingleObject(thread, 20000);
@@ -220,10 +237,10 @@ static int testSuccess(int port)
 {
 	int r;
 	int rc = -2;
-	STARTUPINFOA si;
-	PROCESS_INFORMATION process;
+	STARTUPINFOA si = { 0 };
+	PROCESS_INFORMATION process = { 0 };
 	char arg1[] = "/v:127.0.0.1:XXXXX";
-	char* clientArgs[] = { "test", "/v:127.0.0.1:XXXXX", "/cert-ignore", "/rfx", NULL };
+	char* clientArgs[] = { "test", "/v:127.0.0.1:XXXXX", "/cert:ignore", "/rfx", NULL };
 	char* commandLine = NULL;
 	size_t commandLineLen;
 	int argc = 4;
@@ -266,7 +283,6 @@ static int testSuccess(int port)
 		goto fail;
 
 	_snprintf(commandLine, commandLineLen, "%s --port=%d", exe, port);
-	memset(&si, 0, sizeof(si));
 	si.cb = sizeof(si);
 
 	if (!CreateProcessA(NULL, commandLine, NULL, NULL, FALSE, 0, NULL, wpath, &si, &process))

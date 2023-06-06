@@ -17,11 +17,10 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <winpr/config.h>
 
 #include <stdio.h>
+#include <stdarg.h>
 #include <string.h>
 
 #include <winpr/crt.h>
@@ -38,13 +37,12 @@
 
 #include "wlog.h"
 
-struct _wLogFilter
+typedef struct
 {
 	DWORD Level;
 	LPSTR* Names;
 	size_t NameCount;
-};
-typedef struct _wLogFilter wLogFilter;
+} wLogFilter;
 
 #define WLOG_FILTER_NOT_FILTERED -1
 #define WLOG_FILTER_NOT_INITIALIZED -2
@@ -147,12 +145,12 @@ static BOOL CALLBACK WLog_InitializeRoot(PINIT_ONCE InitOnce, PVOID Parameter, P
 		else if (_stricmp(env, "BINARY") == 0)
 			logAppenderType = WLOG_APPENDER_BINARY;
 
-#ifdef HAVE_SYSLOG_H
+#ifdef WINPR_HAVE_SYSLOG_H
 		else if (_stricmp(env, "SYSLOG") == 0)
 			logAppenderType = WLOG_APPENDER_SYSLOG;
 
-#endif /* HAVE_SYSLOG_H */
-#ifdef HAVE_JOURNALD_H
+#endif /* WINPR_HAVE_SYSLOG_H */
+#ifdef WINPR_HAVE_JOURNALD_H
 		else if (_stricmp(env, "JOURNALD") == 0)
 			logAppenderType = WLOG_APPENDER_JOURNALD;
 
@@ -169,9 +167,8 @@ static BOOL CALLBACK WLog_InitializeRoot(PINIT_ONCE InitOnce, PVOID Parameter, P
 	if (!WLog_ParseFilters(g_RootLog))
 		goto fail;
 
-#if defined(_WIN32)
 	atexit(WLog_Uninit_);
-#endif
+
 	return TRUE;
 fail:
 	WLog_Uninit_();
@@ -201,11 +198,11 @@ static BOOL log_recursion(LPCSTR file, LPCSTR fkt, size_t line)
 	if (__android_log_print(ANDROID_LOG_FATAL, tag, "Recursion detected!!!") < 0)
 		goto out;
 
-	if (__android_log_print(ANDROID_LOG_FATAL, tag, "Check %s [%s:%d]", fkt, file, line) < 0)
+	if (__android_log_print(ANDROID_LOG_FATAL, tag, "Check %s [%s:%zu]", fkt, file, line) < 0)
 		goto out;
 
 	for (i = 0; i < used; i++)
-		if (__android_log_print(ANDROID_LOG_FATAL, tag, "%zd: %s", i, msg[i]) < 0)
+		if (__android_log_print(ANDROID_LOG_FATAL, tag, "%zu: %s", i, msg[i]) < 0)
 			goto out;
 
 #else
@@ -239,7 +236,7 @@ static BOOL WLog_Write(wLog* log, wLogMessage* message)
 
 	if (!appender->active)
 		if (!WLog_OpenAppender(log))
-		return FALSE;
+			return FALSE;
 
 	EnterCriticalSection(&appender->lock);
 
@@ -375,10 +372,10 @@ BOOL WLog_PrintMessageVA(wLog* log, DWORD type, DWORD level, size_t line, const 
 			}
 			else
 			{
-				char formattedLogMessage[WLOG_MAX_STRING_SIZE];
+				char formattedLogMessage[WLOG_MAX_STRING_SIZE] = { 0 };
 
-				if (wvsnprintfx(formattedLogMessage, WLOG_MAX_STRING_SIZE - 1, message.FormatString,
-				                args) < 0)
+				if (vsnprintf(formattedLogMessage, WLOG_MAX_STRING_SIZE - 1, message.FormatString,
+				              args) < 0)
 					return FALSE;
 
 				message.TextString = formattedLogMessage;
@@ -756,25 +753,30 @@ LONG WLog_GetFilterLogLevel(wLog* log)
 	if (log->FilterLevel >= 0)
 		return log->FilterLevel;
 
+	log->FilterLevel = WLOG_FILTER_NOT_FILTERED;
 	for (i = 0; i < g_FilterCount; i++)
 	{
-		for (j = 0; j < g_Filters[i].NameCount; j++)
+		const wLogFilter* filter = &g_Filters[i];
+		for (j = 0; j < filter->NameCount; j++)
 		{
 			if (j >= log->NameCount)
 				break;
 
-			if (_stricmp(g_Filters[i].Names[j], "*") == 0)
+			if (_stricmp(filter->Names[j], "*") == 0)
 			{
 				match = TRUE;
+				log->FilterLevel = filter->Level;
 				break;
 			}
 
-			if (_stricmp(g_Filters[i].Names[j], log->Names[j]) != 0)
+			if (_stricmp(filter->Names[j], log->Names[j]) != 0)
 				break;
 
 			if (j == (log->NameCount - 1))
 			{
-				match = TRUE;
+				match = log->NameCount == filter->NameCount;
+				if (match)
+					log->FilterLevel = filter->Level;
 				break;
 			}
 		}
@@ -783,26 +785,20 @@ LONG WLog_GetFilterLogLevel(wLog* log)
 			break;
 	}
 
-	if (match)
-		log->FilterLevel = g_Filters[i].Level;
-	else
-		log->FilterLevel = WLOG_FILTER_NOT_FILTERED;
-
 	return log->FilterLevel;
 }
 
 static BOOL WLog_ParseName(wLog* log, LPCSTR name)
 {
+	const char* cp = name;
 	char* p;
-	size_t count;
+	size_t count = 1;
 	LPSTR names;
-	count = 1;
-	p = (char*)name;
 
-	while ((p = strchr(p, '.')) != NULL)
+	while ((cp = strchr(cp, '.')) != NULL)
 	{
 		count++;
-		p++;
+		cp++;
 	}
 
 	names = _strdup(name);

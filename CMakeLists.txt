@@ -18,9 +18,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-cmake_minimum_required(VERSION 3.4)
+cmake_minimum_required(VERSION 3.13)
 
 project(FreeRDP C)
+
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS ON)
+
+add_custom_target(fuzzers
+                  COMMENT "Build fuzzers")
 
 if(NOT DEFINED VENDOR)
 	set(VENDOR "FreeRDP" CACHE STRING "FreeRDP package vendor")
@@ -34,9 +41,18 @@ if(NOT DEFINED FREERDP_VENDOR)
 	set(FREERDP_VENDOR 1)
 endif()
 
-set(CMAKE_COLOR_MAKEFILE ON)
+option(CMAKE_COLOR_MAKEFILE "colorful CMake makefile" ON)
+option(CMAKE_VERBOSE_MAKEFILE "verbose CMake makefile" ON)
+option(CMAKE_POSITION_INDEPENDENT_CODE "build with position independent code (-fPIC or -fPIE)" ON)
 
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+if (NOT WIN32 AND NOT ANDROID)
+	if (APPLE)
+		set(OPT_DEFAULT_VAL OFF)
+	else()
+		set(OPT_DEFAULT_VAL ON)
+	endif()
+	option(WITH_X11 "build X11 client/server" ${OPT_DEFAULT_VAL})
+endif()
 
 # Include our extra modules
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/)
@@ -65,7 +81,6 @@ include(TestBigEndian)
 include(FindFeature)
 include(ShowCMakeVars)
 include(ConfigOptions)
-include(ComplexLibrary)
 include(FeatureSummary)
 include(CheckCCompilerFlag)
 include(GNUInstallDirsWrapper)
@@ -74,6 +89,12 @@ include(InstallFreeRDPMan)
 include(GetGitRevisionDescription)
 include(SetFreeRDPCMakeInstallDir)
 
+include(CheckIPOSupported)
+check_ipo_supported(RESULT supported OUTPUT error)
+if (supported)
+	option(CMAKE_INTERPROCEDURAL_OPTIMIZATION "Enable LTO linking" TRUE)
+endif()
+
 # Soname versioning
 set(BUILD_NUMBER 0)
 if ($ENV{BUILD_NUMBER})
@@ -81,22 +102,25 @@ if ($ENV{BUILD_NUMBER})
 endif()
 set(WITH_LIBRARY_VERSIONING "ON")
 
+set(VERSION_REGEX "^(.*)([0-9]+)\\.([0-9]+)\\.([0-9]+)-?(.*)")
 set(RAW_VERSION_STRING "3.0.0-dev")
 if(EXISTS "${PROJECT_SOURCE_DIR}/.source_tag")
 	file(READ ${PROJECT_SOURCE_DIR}/.source_tag RAW_VERSION_STRING)
 elseif(USE_VERSION_FROM_GIT_TAG)
 	git_get_exact_tag(_GIT_TAG --tags --always)
 	if (NOT ${_GIT_TAG} STREQUAL "n/a")
-		set(RAW_VERSION_STRING ${_GIT_TAG})
+		string(REGEX MATCH ${VERSION_REGEX} FOUND_TAG "${_GIT_TAG}")
+		if (FOUND_TAG)
+			set(RAW_VERSION_STRING ${_GIT_TAG})
+		endif()
 	endif()
 endif()
 string(STRIP ${RAW_VERSION_STRING} RAW_VERSION_STRING)
 
-set(VERSION_REGEX "^.?([0-9]+)\\.([0-9]+)\\.([0-9]+)-?(.*)")
-string(REGEX REPLACE "${VERSION_REGEX}" "\\1" FREERDP_VERSION_MAJOR "${RAW_VERSION_STRING}")
-string(REGEX REPLACE "${VERSION_REGEX}" "\\2" FREERDP_VERSION_MINOR "${RAW_VERSION_STRING}")
-string(REGEX REPLACE "${VERSION_REGEX}" "\\3" FREERDP_VERSION_REVISION "${RAW_VERSION_STRING}")
-string(REGEX REPLACE "${VERSION_REGEX}" "\\4" FREERDP_VERSION_SUFFIX "${RAW_VERSION_STRING}")
+string(REGEX REPLACE "${VERSION_REGEX}" "\\2" FREERDP_VERSION_MAJOR "${RAW_VERSION_STRING}")
+string(REGEX REPLACE "${VERSION_REGEX}" "\\3" FREERDP_VERSION_MINOR "${RAW_VERSION_STRING}")
+string(REGEX REPLACE "${VERSION_REGEX}" "\\4" FREERDP_VERSION_REVISION "${RAW_VERSION_STRING}")
+string(REGEX REPLACE "${VERSION_REGEX}" "\\5" FREERDP_VERSION_SUFFIX "${RAW_VERSION_STRING}")
 
 set(FREERDP_API_VERSION "${FREERDP_VERSION_MAJOR}")
 set(FREERDP_VERSION "${FREERDP_VERSION_MAJOR}.${FREERDP_VERSION_MINOR}.${FREERDP_VERSION_REVISION}")
@@ -107,17 +131,41 @@ else()
 endif()
 message("FREERDP_VERSION=${FREERDP_VERSION_FULL}")
 
-set(FREERDP_INCLUDE_DIR "include/freerdp${FREERDP_VERSION_MAJOR}/")
+if(EXISTS "${PROJECT_SOURCE_DIR}/.source_version" )
+	file(READ ${PROJECT_SOURCE_DIR}/.source_version GIT_REVISION)
+
+  string(STRIP ${GIT_REVISION} GIT_REVISION)
+elseif(USE_VERSION_FROM_GIT_TAG)
+	git_get_exact_tag(GIT_REVISION --tags --always)
+
+	if (${GIT_REVISION} STREQUAL "n/a")
+		git_rev_parse (GIT_REVISION --short)
+	endif()
+endif()
+
+if (NOT GIT_REVISION)
+	set(GIT_REVISION ${FREERDP_VERSION})
+endif()
+
+message(STATUS "Git Revision ${GIT_REVISION}")
+
+set(FREERDP_MAJOR_DIR "freerdp${FREERDP_VERSION_MAJOR}")
+set(FREERDP_INCLUDE_DIR "include/${FREERDP_MAJOR_DIR}/")
+
+option(WITH_SMARTCARD_EMULATE "Emulate smartcards instead of redirecting readers" OFF)
+if (WITH_SMARTCARD_EMULATE)
+	add_definitions(-DWITH_SMARTCARD_EMULATE)
+	find_package(ZLIB REQUIRED)
+endif()
 
 option(WITH_FREERDP_DEPRECATED "Build FreeRDP deprecated symbols" OFF)
 if (WITH_FREERDP_DEPRECATED)
 	add_definitions(-DWITH_FREERDP_DEPRECATED)
 endif()
 
-# Compatibility options
-if(DEFINED STATIC_CHANNELS)
-	message(WARNING "STATIC_CHANNELS is obsolete, please use BUILTIN_CHANNELS instead")
-	set(BUILTIN_CHANNELS ${STATIC_CHANNELS} CACHE BOOL "" FORCE)
+option(WITH_FREERDP_DEPRECATED_COMMANDLINE "Build FreeRDP deprecated command line options" OFF)
+if (WITH_FREERDP_DEPRECATED_COMMANDLINE)
+    add_definitions(-DWITH_FREERDP_DEPRECATED_COMMANDLINE)
 endif()
 
 # Make paths absolute
@@ -140,24 +188,10 @@ if(CCACHE AND WITH_CCACHE)
 	endif(NOT DEFINED CMAKE_C_COMPILER_LAUNCHER)
 endif(CCACHE AND WITH_CCACHE)
 
-if(EXISTS "${PROJECT_SOURCE_DIR}/.source_version" )
-	file(READ ${PROJECT_SOURCE_DIR}/.source_version GIT_REVISION)
-
-  string(STRIP ${GIT_REVISION} GIT_REVISION)
-else()
-	git_get_exact_tag(GIT_REVISION --tags --always)
-
-	if (${GIT_REVISION} STREQUAL "n/a")
-		git_rev_parse (GIT_REVISION --short)
-	endif()
-endif()
-
 if(CMAKE_CROSSCOMPILING)
 	SET (CMAKE_FIND_ROOT_PATH_MODE_PROGRAM ONLY)
 endif(CMAKE_CROSSCOMPILING)
 # /Allow to search the host machine for git/ccache
-
-message(STATUS "Git Revision ${GIT_REVISION}")
 
 # Turn on solution folders (2.8.4+)
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
@@ -177,13 +211,14 @@ option(EXPORT_ALL_SYMBOLS "Export all symbols form library" OFF)
 if(BUILD_TESTING)
 	set(EXPORT_ALL_SYMBOLS TRUE)
 	set(CTEST_OUTPUT_ON_FAILURE TRUE)
+	add_definitions(-DBUILD_TESTING)
 elseif(NOT DEFINED EXPORT_ALL_SYMBOLS)
 	set(EXPORT_ALL_SYMBOLS FALSE)
 endif()
 
 if (EXPORT_ALL_SYMBOLS)
-#	set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
-	add_definitions(-DFREERDP_TEST_EXPORTS -DBUILD_TESTING)
+	#	set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
+	add_definitions(-DEXPORT_ALL_SYMBOLS)
 endif(EXPORT_ALL_SYMBOLS)
 
 # BSD
@@ -283,7 +318,7 @@ if (CMAKE_GENERATOR MATCHES "Unix Makefile*")
 		string(TOUPPER ${CMAKE_BUILD_TYPE} UPPER_BUILD_TYPE)
 		CHECK_C_COMPILER_FLAG (-Wno-builtin-macro-redefined Wno-builtin-macro-redefined)
 		if(Wno-builtin-macro-redefined)
-			set(CMAKE_C_FLAGS_${UPPER_BUILD_TYPE} "${CMAKE_C_FLAGS_${UPPER_BUILD_TYPE}} -Wno-builtin-macro-redefined -D__FILE__='\"$(subst ${PROJCET_BINARY_DIR}/,,$(subst ${PROJECT_SOURCE_DIR}/,,$(abspath $<)))\"'")
+			set(CMAKE_C_FLAGS_${UPPER_BUILD_TYPE} "${CMAKE_C_FLAGS_${UPPER_BUILD_TYPE}} -Wno-builtin-macro-redefined -D__FILE__='\"$(subst ${PROJECT_BINARY_DIR}/,,$(subst ${PROJECT_SOURCE_DIR}/,,$(abspath $<)))\"'")
 		endif()
 	endif()
 endif()
@@ -296,12 +331,6 @@ set(THREAD_PREFER_PTHREAD_FLAG TRUE)
 
 if(NOT IOS)
 	find_package(Threads REQUIRED)
-endif()
-
-if (IOS)
-	set(HAVE_STRNDUP 1)
-else()
-	CHECK_SYMBOL_EXISTS(strndup string.h HAVE_STRNDUP)
 endif()
 
 # Enable address sanitizer, where supported and when required
@@ -416,6 +445,7 @@ if(WIN32)
 	add_definitions(-DWIN32_LEAN_AND_MEAN)
 	add_definitions(-D_WINSOCK_DEPRECATED_NO_WARNINGS)
 
+	set(CMAKE_DL_LIBS "")
 	set(CMAKE_USE_RELATIVE_PATH ON)
 	if (${CMAKE_GENERATOR} MATCHES "NMake Makefile*" OR ${CMAKE_GENERATOR} MATCHES "Ninja*" OR ${CMAKE_GENERATOR} MATCHES "Unix Makefiles")
 		set(CMAKE_PDB_BINARY_DIR ${PROJECT_BINARY_DIR})
@@ -454,22 +484,6 @@ endif()
 
 add_definitions(-DFREERDP_EXPORTS)
 
-# Include files
-if(NOT IOS)
-	check_include_files(unistd.h HAVE_UNISTD_H)
-	check_include_files(execinfo.h HAVE_EXECINFO_H)
-	check_include_files(inttypes.h HAVE_INTTYPES_H)
-else()
-	set(HAVE_UNISTD_H 1)
-	set(HAVE_INTTYPES_H 1)
-endif()
-
-if(NOT IOS)
-	check_struct_has_member("struct tm" tm_gmtoff time.h HAVE_TM_GMTOFF)
-else()
-	set(HAVE_TM_GMTOFF 1)
-endif()
-
 # Mac OS X
 if(APPLE)
 	if(IOS)
@@ -478,10 +492,6 @@ if(APPLE)
 		endif()
 		set(CMAKE_FIND_ROOT_PATH ${CMAKE_FIND_ROOT_PATH} ${FREERDP_IOS_EXTERNAL_SSL_PATH})
 		set_property(GLOBAL PROPERTY XCODE_ATTRIBUTE_SKIP_INSTALL YES)
-	else(IOS)
-		if(NOT DEFINED CMAKE_OSX_ARCHITECTURES)
-			set(CMAKE_OSX_ARCHITECTURES i386 x86_64)
-		endif()
 	endif(IOS)
 
 # Temporarily disabled, causes the cmake script to be reexecuted, causing the compilation to fail.
@@ -517,7 +527,6 @@ if(ANDROID)
 
 	if(ANDROID_ABI STREQUAL arm64-v8a)
 		# https://github.com/android/ndk/issues/910
-		add_definitions(-D__ARM_NEON)
 		set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -mfloat-abi=softfp")
 	endif()
 
@@ -556,41 +565,20 @@ if(ANDROID)
 endif()
 
 if(WITH_VALGRIND_MEMCHECK)
-	check_include_files(valgrind/memcheck.h HAVE_VALGRIND_MEMCHECK_H)
+    check_include_files(valgrind/memcheck.h FREERDP_HAVE_VALGRIND_MEMCHECK_H)
 else()
-	unset(HAVE_VALGRIND_MEMCHECK_H CACHE)
+    unset(FREERDP_HAVE_VALGRIND_MEMCHECK_H CACHE)
 endif()
 
 if(UNIX OR CYGWIN)
-	if (FREEBSD)
-		list(APPEND CMAKE_REQUIRED_INCLUDES ${EPOLLSHIM_INCLUDE_DIR})
-	endif()
-	if (FREEBSD)
-		list(REMOVE_ITEM CMAKE_REQUIRED_INCLUDES ${EPOLLSHIM_INCLUDE_DIR})
-	endif()
-	if(NOT APPLE)
-		check_include_files(poll.h HAVE_POLL_H)
-	endif()
-	list(APPEND CMAKE_REQUIRED_LIBRARIES m)
-	check_symbol_exists(ceill math.h HAVE_MATH_C99_LONG_DOUBLE)
-	list(REMOVE_ITEM CMAKE_REQUIRED_LIBRARIES m)
-	set(X11_FEATURE_TYPE "RECOMMENDED")
 	set(WAYLAND_FEATURE_TYPE "RECOMMENDED")
-
-	include(CheckFunctionExists)
-
-	check_function_exists(getlogin_r HAVE_GETLOGIN_R)
 else()
-	set(X11_FEATURE_TYPE "DISABLED")
 	set(WAYLAND_FEATURE_TYPE "DISABLED")
 endif()
 
 if(WITH_PCSC_WINPR)
 	find_package(PCSCWinPR)
 endif()
-
-set(X11_FEATURE_PURPOSE "X11")
-set(X11_FEATURE_DESCRIPTION "X11 client and server")
 
 set(WAYLAND_FEATURE_PURPOSE "Wayland")
 set(WAYLAND_FEATURE_DESCRIPTION "Wayland client")
@@ -634,6 +622,10 @@ set(CUPS_FEATURE_DESCRIPTION "printer device redirection")
 set(PCSC_FEATURE_TYPE "RECOMMENDED")
 set(PCSC_FEATURE_PURPOSE "smart card")
 set(PCSC_FEATURE_DESCRIPTION "smart card device redirection")
+
+set(CJSON_FEATURE_TYPE "RECOMMENDED")
+set(CJSON_FEATURE_PURPOSE "JSON")
+set(CJSON_FEATURE_DESCRIPTION "Azure AD, RDS AAD authentication")
 
 set(FFMPEG_FEATURE_TYPE "RECOMMENDED")
 set(FFMPEG_FEATURE_PURPOSE "multimedia")
@@ -679,12 +671,7 @@ set(SOXR_FEATURE_TYPE "OPTIONAL")
 set(SOXR_FEATURE_PURPOSE "codec")
 set(SOXR_FEATURE_DESCRIPTION "SOX audio resample library")
 
-set(GSSAPI_FEATURE_TYPE "OPTIONAL")
-set(GSSAPI_FEATURE_PURPOSE "auth")
-set(GSSAPI_FEATURE_DESCRIPTION "add kerberos support")
-
 if(WIN32)
-	set(X11_FEATURE_TYPE "DISABLED")
 	set(WAYLAND_FEATURE_TYPE "DISABLED")
 	set(ZLIB_FEATURE_TYPE "OPTIONAL")
 	set(OSS_FEATURE_TYPE "DISABLED")
@@ -701,13 +688,11 @@ endif()
 if(APPLE)
 	set(FFMPEG_FEATURE_TYPE "OPTIONAL")
 	set(VAAPI_FEATURE_TYPE "DISABLED")
-	set(X11_FEATURE_TYPE "OPTIONAL")
 	set(WAYLAND_FEATURE_TYPE "DISABLED")
 	set(OSS_FEATURE_TYPE "DISABLED")
 	set(ALSA_FEATURE_TYPE "DISABLED")
 	set(SNDIO_FEATURE_TYPE "DISABLED")
 	if(IOS)
-		set(X11_FEATURE_TYPE "DISABLED")
 		set(PULSE_FEATURE_TYPE "DISABLED")
 		set(CUPS_FEATURE_TYPE "DISABLED")
 		set(PCSC_FEATURE_TYPE "DISABLED")
@@ -724,14 +709,13 @@ if(UNIX AND NOT ANDROID)
 	find_feature(libsystemd ${WLOG_SYSTEMD_JOURNAL_FEATURE_TYPE} ${WLOG_SYSTEMD_JOURNAL_FEATURE_PURPOSE} ${WLOG_SYSTEMD_JOURNAL_FEATURE_DESCRIPTION})
 
 	if(LIBSYSTEMD_FOUND)
-		set(HAVE_JOURNALD_H TRUE)
+        set(WINPR_HAVE_JOURNALD_H TRUE)
 	else()
-		unset(HAVE_JOURNALD_H)
+        unset(WINPR_HAVE_JOURNALD_H)
 	endif()
 endif(UNIX AND NOT ANDROID)
 
 if(ANDROID)
-	set(X11_FEATURE_TYPE "DISABLED")
 	set(WAYLAND_FEATURE_TYPE "DISABLED")
 	set(OSS_FEATURE_TYPE "DISABLED")
 	set(ALSA_FEATURE_TYPE "DISABLED")
@@ -739,12 +723,10 @@ if(ANDROID)
 	set(PULSE_FEATURE_TYPE "DISABLED")
 	set(CUPS_FEATURE_TYPE "DISABLED")
 	set(PCSC_FEATURE_TYPE "DISABLED")
-	set(FFMPEG_FEATURE_TYPE "DISABLED")
 	set(VAAPI_FEATURE_TYPE "DISABLED")
 	set(OPENSLES_FEATURE_TYPE "REQUIRED")
 endif()
 
-find_feature(X11 ${X11_FEATURE_TYPE} ${X11_FEATURE_PURPOSE} ${X11_FEATURE_DESCRIPTION})
 find_feature(Wayland ${WAYLAND_FEATURE_TYPE} ${WAYLAND_FEATURE_PURPOSE} ${WAYLAND_FEATURE_DESCRIPTION})
 
 find_feature(ZLIB ${ZLIB_FEATURE_TYPE} ${ZLIB_FEATURE_PURPOSE} ${ZLIB_FEATURE_DESCRIPTION})
@@ -759,6 +741,12 @@ find_feature(Pulse ${PULSE_FEATURE_TYPE} ${PULSE_FEATURE_PURPOSE} ${PULSE_FEATUR
 find_feature(Cups ${CUPS_FEATURE_TYPE} ${CUPS_FEATURE_PURPOSE} ${CUPS_FEATURE_DESCRIPTION})
 find_feature(PCSC ${PCSC_FEATURE_TYPE} ${PCSC_FEATURE_PURPOSE} ${PCSC_FEATURE_DESCRIPTION})
 
+find_feature(CJSON ${CJSON_FEATURE_TYPE} ${CJSON_FEATURE_PURPOSE} ${CJSON_FEATURE_DESCRIPTION})
+
+if (WITH_DSP_FFMPEG OR WITH_VIDEO_FFMPEG OR WITH_FFMPEG)
+	set(FFMPEG_FEATURE_TYPE "REQUIRED" )
+endif()
+
 find_feature(FFmpeg ${FFMPEG_FEATURE_TYPE} ${FFMPEG_FEATURE_PURPOSE} ${FFMPEG_FEATURE_DESCRIPTION})
 
 find_feature(JPEG ${JPEG_FEATURE_TYPE} ${JPEG_FEATURE_PURPOSE} ${JPEG_FEATURE_DESCRIPTION})
@@ -770,16 +758,9 @@ find_feature(FAAD2 ${FAAD2_FEATURE_TYPE} ${FAAD2_FEATURE_PURPOSE} ${FAAD2_FEATUR
 find_feature(FAAC ${FAAC_FEATURE_TYPE} ${FAAC_FEATURE_PURPOSE} ${FAAC_FEATURE_DESCRIPTION})
 find_feature(soxr ${SOXR_FEATURE_TYPE} ${SOXR_FEATURE_PURPOSE} ${SOXR_FEATURE_DESCRIPTION})
 
-find_feature(GSSAPI ${GSSAPI_FEATURE_TYPE} ${GSSAPI_FEATURE_PURPOSE} ${GSSAPI_FEATURE_DESCRIPTION})
-
 if (WITH_OPENH264 AND NOT WITH_OPENH264_LOADING)
 	option(WITH_OPENH264_LOADING "Use LoadLibrary to load openh264 at runtime" OFF)
 endif (WITH_OPENH264 AND NOT WITH_OPENH264_LOADING)
-
-if ((WITH_FFMPEG OR WITH_DSP_FFMPEG) AND NOT FFMPEG_FOUND)
-	message(FATAL_ERROR "FFMPEG support requested but not detected")
-endif()
-set(WITH_FFMPEG ${FFMPEG_FOUND})
 
 # Version check, if we have detected FFMPEG but the version is too old
 # deactivate it as sound backend.
@@ -787,18 +768,23 @@ if (WITH_DSP_FFMPEG)
 	# Deactivate FFmpeg backend for sound, if the version is too old.
 	# See libfreerdp/codec/dsp_ffmpeg.h
 	file(STRINGS "${AVCODEC_INCLUDE_DIR}/libavcodec/version.h" AV_VERSION_FILE REGEX "LIBAVCODEC_VERSION_M[A-Z]+[\t ]*[0-9]+")
+	if (EXISTS "${AVCODEC_INCLUDE_DIR}/libavcodec/version_major.h")
+		file(STRINGS "${AVCODEC_INCLUDE_DIR}/libavcodec/version_major.h" AV_VERSION_FILE2 REGEX "LIBAVCODEC_VERSION_M[A-Z]+[\t ]*[0-9]+")
+		list(APPEND AV_VERSION_FILE ${AV_VERSION_FILE2})
+	endif()
+
 	FOREACH(item ${AV_VERSION_FILE})
 	  STRING(REGEX MATCH "LIBAVCODEC_VERSION_M[A-Z]+[\t ]*[0-9]+" litem ${item})
-	IF(litem)
-			string(REGEX REPLACE "[ \t]+" ";" VSPLIT_LINE ${litem})
-			list(LENGTH VSPLIT_LINE VSPLIT_LINE_LEN)
-			if (NOT "${VSPLIT_LINE_LEN}" EQUAL "2")
-				message(ERROR "invalid entry in libavcodec version header ${item}")
-			endif(NOT "${VSPLIT_LINE_LEN}" EQUAL "2")
-			list(GET VSPLIT_LINE 0 VNAME)
-			list(GET VSPLIT_LINE 1 VVALUE)
-			set(${VNAME} ${VVALUE})
-	ENDIF(litem)
+		IF(litem)
+				string(REGEX REPLACE "[ \t]+" ";" VSPLIT_LINE ${litem})
+				list(LENGTH VSPLIT_LINE VSPLIT_LINE_LEN)
+				if (NOT "${VSPLIT_LINE_LEN}" EQUAL "2")
+					message(ERROR "invalid entry in libavcodec version header ${item}")
+				endif(NOT "${VSPLIT_LINE_LEN}" EQUAL "2")
+				list(GET VSPLIT_LINE 0 VNAME)
+				list(GET VSPLIT_LINE 1 VVALUE)
+				set(${VNAME} ${VVALUE})
+		ENDIF(litem)
 	ENDFOREACH(item ${AV_VERSION_FILE})
 
 	set(AVCODEC_VERSION "${LIBAVCODEC_VERSION_MAJOR}.${LIBAVCODEC_VERSION_MINOR}.${LIBAVCODEC_VERSION_MICRO}")
@@ -813,23 +799,6 @@ if (WITH_OPENH264 AND NOT OPENH264_FOUND)
 endif()
 set(WITH_OPENH264 ${OPENH264_FOUND})
 
-if ( (WITH_GSSAPI) AND (NOT GSS_FOUND))
-	message(WARNING "-DWITH_GSSAPI=ON is set, but not GSSAPI implementation was found, disabling")
-elseif(WITH_GSSAPI)
-	if(GSS_FLAVOUR STREQUAL "MIT")
-		add_definitions("-DWITH_GSSAPI -DWITH_GSSAPI_MIT")
-		if(GSS_VERSION_1_13)
-			add_definitions("-DHAVE_AT_LEAST_KRB_V1_13")
-		endif()
-		include_directories(${_GSS_INCLUDE_DIR})
-	elseif(GSS_FLAVOUR STREQUAL "Heimdal")
-		add_definitions("-DWITH_GSSAPI -DWITH_GSSAPI_HEIMDAL")
-		include_directories(${_GSS_INCLUDE_DIR})
-	else()
-		message(WARNING "Kerberos version not detected")
-	endif()
-endif()
-
 if(TARGET_ARCH MATCHES "x86|x64")
 	if (NOT APPLE)
 		# Intel Performance Primitives
@@ -841,13 +810,11 @@ if(OPENSSL_FOUND)
 	add_definitions("-DWITH_OPENSSL")
 	message(STATUS "Using OpenSSL Version: ${OPENSSL_VERSION}")
 	include_directories(${OPENSSL_INCLUDE_DIR})
-endif()
-
-if(MBEDTLS_FOUND)
+elseif(MBEDTLS_FOUND)
 	add_definitions("-DWITH_MBEDTLS")
 endif()
 
-if (WITH_OPENH264 OR WITH_MEDIA_FOUNDATION OR WITH_FFMPEG)
+if (WITH_OPENH264 OR WITH_MEDIA_FOUNDATION OR WITH_VIDEO_FFMPEG OR WITH_MEDIACODEC)
 	set(WITH_GFX_H264 ON)
 else()
 	set(WITH_GFX_H264 OFF)
@@ -863,18 +830,19 @@ if (ANDROID OR WIN32 OR MAC_BUNDLE)
   set(FREERDP_LIBRARY_PATH ".")
   set(FREERDP_PLUGIN_PATH ".")
 else()
-	set(FREERDP_DATA_PATH "${CMAKE_INSTALL_PREFIX}/share/freerdp${FREERDP_VERSION_MAJOR}")
+	set(FREERDP_DATA_PATH "${CMAKE_INSTALL_PREFIX}/share/${FREERDP_MAJOR_DIR}")
 	if (NOT FREERDP_INSTALL_PREFIX)
 		set(FREERDP_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
 	endif()
 	set(FREERDP_LIBRARY_PATH "${CMAKE_INSTALL_LIBDIR}")
-	set(FREERDP_PLUGIN_PATH "${CMAKE_INSTALL_LIBDIR}/freerdp${FREERDP_VERSION_MAJOR}")
+	set(FREERDP_PLUGIN_PATH "${CMAKE_INSTALL_LIBDIR}/${FREERDP_MAJOR_DIR}")
 endif()
 set(FREERDP_ADDIN_PATH "${FREERDP_PLUGIN_PATH}")
 
 # Path to put extensions
-set(FREERDP_EXTENSION_REL_PATH "${CMAKE_INSTALL_LIBDIR}/freerdp${FREERDP_VERSION_MAJOR}/extensions")
-set(FREERDP_EXTENSION_PATH "${CMAKE_INSTALL_FULL_LIBDIR}/freerdp${FREERDP_VERSION_MAJOR}/extensions")
+set(FREERDP_EXTENSION_POSTFIX "${FREERDP_MAJOR_DIR}/extensions")
+set(FREERDP_EXTENSION_REL_PATH "${CMAKE_INSTALL_LIBDIR}/${FREERDP_EXTENSION_POSTFIX}")
+set(FREERDP_EXTENSION_PATH "${CMAKE_INSTALL_FULL_LIBDIR}/${FREERDP_EXTENSION_POSTFIX}")
 
 # Proxy plugins path
 if(NOT DEFINED PROXY_PLUGINDIR)
@@ -884,25 +852,8 @@ else()
 	set(FREERDP_PROXY_PLUGINDIR "${PROXY_PLUGINDIR}")
 endif()
 
-# Declare we have config.h, generated later on.
-add_definitions("-DHAVE_CONFIG_H")
-
 # RPATH configuration
-set(CMAKE_SKIP_BUILD_RPATH FALSE)
-set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
-if (APPLE)
-	set(CMAKE_INSTALL_RPATH_USE_LINK_PATH FALSE)
-	set(CMAKE_INSTALL_RPATH "@loader_path/../Frameworks")
-else (APPLE)
-	set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
-	if (NOT FREEBSD)
-		set(CMAKE_INSTALL_RPATH "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}:\$ORIGIN/..")
-		option(WITH_ADD_PLUGIN_TO_RPATH "Add extension and plugin path to RPATH" OFF)
-		if (WITH_ADD_PLUGIN_TO_RPATH)
-			set(CMAKE_INSTALL_RPATH "\$ORIGIN/../${FREERDP_EXTENSION_REL_PATH}:\$ORIGIN/../${FREERDP_PLUGIN_PATH}:${CMAKE_INSTALL_RPATH}")
-		endif()
-	endif()
-endif(APPLE)
+include(ConfigureRPATH)
 
 if (BUILD_SHARED_LIBS)
 	set(CMAKE_MACOSX_RPATH ON)
@@ -945,7 +896,10 @@ if (FREERDP_UNIFIED_BUILD)
 		add_subdirectory(uwac)
 	endif()
 	if (WITH_SERVER)
-		add_subdirectory(rdtk)
+		option(WITH_RDTK "build rdtk toolkit" ON)
+		if (WITH_RDTK)
+			add_subdirectory(rdtk)
+		endif()
 	endif()
 
 	include_directories(${PROJECT_SOURCE_DIR}/winpr/include)
@@ -969,7 +923,6 @@ if(WITH_THIRD_PARTY)
 	endif()
 endif()
 
-add_subdirectory(include)
 
 add_subdirectory(libfreerdp)
 
@@ -997,9 +950,6 @@ if(WITH_SERVER)
 	add_subdirectory(server)
 endif()
 
-# Configure files - Add last so all symbols are defined
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.h.in ${CMAKE_CURRENT_BINARY_DIR}/config.h)
-
 # Packaging
 
 set(CMAKE_CPACK_INCLUDE_FILE "CMakeCPack.cmake")
@@ -1014,22 +964,24 @@ endif()
 
 #message("VENDOR: ${VENDOR} CLIENT_VENDOR_PATH: ${CLIENT_VENDOR_PATH} CMAKE_CPACK_INCLUDE_FILE: ${CMAKE_CPACK_INCLUDE_FILE}")
 
-include(${CMAKE_CPACK_INCLUDE_FILE})
-
 set(FREERDP_BUILD_CONFIG_LIST "")
 GET_CMAKE_PROPERTY(res VARIABLES)
 FOREACH(var ${res})
-	IF (var MATCHES "^WITH_*|^BUILD_TESTING|^BUILTIN_CHANNELS|^HAVE_*")
-		LIST(APPEND FREERDP_BUILD_CONFIG_LIST "${var}=${${var}}")
-	ENDIF()
+    IF (var MATCHES "^WITH_*|^BUILD_TESTING|^WINPR_HAVE_*")
+				LIST(APPEND FREERDP_BUILD_CONFIG_LIST "${var}=${${var}}")
+		ENDIF()
 ENDFOREACH()
 string(REPLACE ";" " " FREERDP_BUILD_CONFIG "${FREERDP_BUILD_CONFIG_LIST}")
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/buildflags.h.in ${CMAKE_CURRENT_BINARY_DIR}/buildflags.h)
+
+add_subdirectory(include)
+
+include(${CMAKE_CPACK_INCLUDE_FILE})
 
 message(STATUS "Intrinsic path configuration:")
 #ShowCMakeVars("^CMAKE_INSTALL_PREFIX")
 #ShowCMakeVars("^CMAKE_INSTALL_LIBDIR")
 ShowCMakeVars("^FREERDP_INSTALL_PREFIX|^FREERDP_LIBRARY_PATH|^FREERDP_PLUGIN_PATH")
 ShowCMakeVars("^FREERDP_ADDIN_PATH|^FREERDP_EXTENSION_PATH|^FREERDP_PROXY_PLUGINDIR")
+
 
 

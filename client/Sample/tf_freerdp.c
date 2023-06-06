@@ -19,9 +19,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <errno.h>
 #include <stdio.h>
@@ -143,8 +141,9 @@ static BOOL tf_pre_connect(freerdp* instance)
 	rdpSettings* settings;
 
 	WINPR_ASSERT(instance);
+	WINPR_ASSERT(instance->context);
 
-	settings = instance->settings;
+	settings = instance->context->settings;
 	WINPR_ASSERT(settings);
 
 	/* Optional OS identifier sent to server */
@@ -158,11 +157,6 @@ static BOOL tf_pre_connect(freerdp* instance)
 	PubSub_SubscribeChannelConnected(instance->context->pubSub, tf_OnChannelConnectedEventHandler);
 	PubSub_SubscribeChannelDisconnected(instance->context->pubSub,
 	                                    tf_OnChannelDisconnectedEventHandler);
-
-	/* Load all required plugins / channels / libraries specified by current
-	 * settings. */
-	if (!freerdp_client_load_addins(instance->context->channels, instance->settings))
-		return FALSE;
 
 	/* TODO: Any code your client requires */
 	return TRUE;
@@ -178,20 +172,28 @@ static BOOL tf_pre_connect(freerdp* instance)
  */
 static BOOL tf_post_connect(freerdp* instance)
 {
+	rdpContext* context;
+
 	if (!gdi_init(instance, PIXEL_FORMAT_XRGB32))
 		return FALSE;
+
+	context = instance->context;
+	WINPR_ASSERT(context);
+	WINPR_ASSERT(context->update);
 
 	/* With this setting we disable all graphics processing in the library.
 	 *
 	 * This allows low resource (client) protocol parsing.
 	 */
-	freerdp_settings_set_bool(instance->settings, FreeRDP_DeactivateClientDecoding, TRUE);
-	instance->update->BeginPaint = tf_begin_paint;
-	instance->update->EndPaint = tf_end_paint;
-	instance->update->PlaySound = tf_play_sound;
-	instance->update->DesktopResize = tf_desktop_resize;
-	instance->update->SetKeyboardIndicators = tf_keyboard_set_indicators;
-	instance->update->SetKeyboardImeStatus = tf_keyboard_set_ime_status;
+	if (!freerdp_settings_set_bool(context->settings, FreeRDP_DeactivateClientDecoding, TRUE))
+		return FALSE;
+
+	context->update->BeginPaint = tf_begin_paint;
+	context->update->EndPaint = tf_end_paint;
+	context->update->PlaySound = tf_play_sound;
+	context->update->DesktopResize = tf_desktop_resize;
+	context->update->SetKeyboardIndicators = tf_keyboard_set_indicators;
+	context->update->SetKeyboardImeStatus = tf_keyboard_set_ime_status;
 	return TRUE;
 }
 
@@ -230,10 +232,12 @@ static DWORD WINAPI tf_client_thread_proc(LPVOID arg)
 	HANDLE handles[MAXIMUM_WAIT_OBJECTS] = { 0 };
 	BOOL rc = freerdp_connect(instance);
 
-	if (instance->settings->AuthenticationOnly)
+	WINPR_ASSERT(instance->context);
+	WINPR_ASSERT(instance->context->settings);
+	if (instance->context->settings->AuthenticationOnly)
 	{
 		result = freerdp_get_last_error(instance->context);
-		freerdp_abort_connect(instance);
+		freerdp_abort_connect_context(instance->context);
 		WLog_ERR(TAG, "Authentication only, exit status 0x%08" PRIx32 "", result);
 		goto disconnect;
 	}
@@ -245,13 +249,13 @@ static DWORD WINAPI tf_client_thread_proc(LPVOID arg)
 		return result;
 	}
 
-	while (!freerdp_shall_disconnect(instance))
+	while (!freerdp_shall_disconnect_context(instance->context))
 	{
 		nCount = freerdp_get_event_handles(instance->context, handles, ARRAYSIZE(handles));
 
 		if (nCount == 0)
 		{
-			WLog_ERR(TAG, "%s: freerdp_get_event_handles failed", __FUNCTION__);
+			WLog_ERR(TAG, "freerdp_get_event_handles failed");
 			break;
 		}
 
@@ -259,8 +263,7 @@ static DWORD WINAPI tf_client_thread_proc(LPVOID arg)
 
 		if (status == WAIT_FAILED)
 		{
-			WLog_ERR(TAG, "%s: WaitForMultipleObjects failed with %" PRIu32 "", __FUNCTION__,
-			         status);
+			WLog_ERR(TAG, "WaitForMultipleObjects failed with %" PRIu32 "", status);
 			break;
 		}
 
@@ -320,9 +323,6 @@ static BOOL tf_client_new(freerdp* instance, rdpContext* context)
 	instance->PreConnect = tf_pre_connect;
 	instance->PostConnect = tf_post_connect;
 	instance->PostDisconnect = tf_post_disconnect;
-	instance->AuthenticateEx = client_cli_authenticate_ex;
-	instance->VerifyCertificateEx = client_cli_verify_certificate_ex;
-	instance->VerifyChangedCertificateEx = client_cli_verify_changed_certificate_ex;
 	instance->LogonErrorInfo = tf_logon_error_info;
 	/* TODO: Client display set up */
 	WINPR_UNUSED(tf);
@@ -391,7 +391,7 @@ int main(int argc, char* argv[])
 		goto fail;
 	}
 
-	if (!stream_dump_register_handlers(context, CONNECTION_STATE_MCS_CONNECT))
+	if (!stream_dump_register_handlers(context, CONNECTION_STATE_MCS_CREATE_REQUEST, FALSE))
 		goto fail;
 
 	if (freerdp_client_start(context) != 0)

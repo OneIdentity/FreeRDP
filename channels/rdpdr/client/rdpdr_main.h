@@ -42,15 +42,25 @@
 #include <CoreServices/CoreServices.h>
 #endif
 
-#define TAG CHANNELS_TAG("rdpdr.client")
+enum RDPDR_CHANNEL_STATE
+{
+	RDPDR_CHANNEL_STATE_INITIAL = 0,
+	RDPDR_CHANNEL_STATE_ANNOUNCE,
+	RDPDR_CHANNEL_STATE_ANNOUNCE_REPLY,
+	RDPDR_CHANNEL_STATE_NAME_REQUEST,
+	RDPDR_CHANNEL_STATE_SERVER_CAPS,
+	RDPDR_CHANNEL_STATE_CLIENT_CAPS,
+	RDPDR_CHANNEL_STATE_CLIENTID_CONFIRM,
+	RDPDR_CHANNEL_STATE_READY,
+	RDPDR_CHANNEL_STATE_USER_LOGGEDON
+};
 
-typedef struct rdpdr_plugin rdpdrPlugin;
-
-struct rdpdr_plugin
+typedef struct
 {
 	CHANNEL_DEF channelDef;
 	CHANNEL_ENTRY_POINTS_FREERDP_EX channelEntryPoints;
 
+	enum RDPDR_CHANNEL_STATE state;
 	HANDLE thread;
 	wStream* data_in;
 	void* InitHandle;
@@ -58,9 +68,12 @@ struct rdpdr_plugin
 	wMessageQueue* queue;
 
 	DEVMAN* devman;
+	BOOL ignoreInvalidDevices;
 
-	UINT16 versionMajor;
-	UINT16 versionMinor;
+	UINT16 serverVersionMajor;
+	UINT16 serverVersionMinor;
+	UINT16 clientVersionMajor;
+	UINT16 clientVersionMinor;
 	UINT32 clientID;
 	char computerName[256];
 
@@ -78,8 +91,11 @@ struct rdpdr_plugin
 	HANDLE stopEvent;
 #endif
 	rdpContext* rdpcontext;
-};
+	wStreamPool* pool;
+	wLog* log;
+} rdpdrPlugin;
 
+BOOL rdpdr_state_advance(rdpdrPlugin* rdpdr, enum RDPDR_CHANNEL_STATE next);
 UINT rdpdr_send(rdpdrPlugin* rdpdr, wStream* s);
 
 #endif /* FREERDP_CHANNEL_RDPDR_CLIENT_MAIN_H */

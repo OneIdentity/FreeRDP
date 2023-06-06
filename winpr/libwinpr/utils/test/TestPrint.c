@@ -14,11 +14,7 @@
  * http://www.codingunit.com/printf-format-specifiers-format-conversions-and-formatted-output
  */
 
-#if 0
 #define _printf printf
-#else
-#define _printf wprintfx
-#endif
 
 static BOOL test_bin_tohex_string(void)
 {
@@ -325,7 +321,7 @@ int TestPrint(int argc, char* argv[])
 	_printf("%3d\n", b);
 	_printf("%03d\n", b);
 	c = 15.3f;
-	d = c / 3;
+	d = c / 3.0f;
 	_printf("%3.2f\n", d);
 
 	/**
@@ -370,7 +366,7 @@ int TestPrint(int argc, char* argv[])
 	_printf("Hexadecimal: %x/%X\n", 255, 255);
 	_printf("Octal: %o\n", 255);
 	_printf("Unsigned value: %u\n", 150);
-	_printf("Just print the percentage sign %%\n", 10);
+	_printf("Just print the percentage sign %%\n");
 
 	/**
 	 * :Hello, world!:

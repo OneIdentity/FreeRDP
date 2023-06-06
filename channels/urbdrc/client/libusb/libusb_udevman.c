@@ -56,17 +56,13 @@
 	_man->iface.get_##_arg = udevman_get_##_arg; \
 	_man->iface.set_##_arg = udevman_set_##_arg
 
-typedef struct _VID_PID_PAIR VID_PID_PAIR;
-
-struct _VID_PID_PAIR
+typedef struct
 {
 	UINT16 vid;
 	UINT16 pid;
-};
+} VID_PID_PAIR;
 
-typedef struct _UDEVMAN UDEVMAN;
-
-struct _UDEVMAN
+typedef struct
 {
 	IUDEVMAN iface;
 
@@ -86,7 +82,7 @@ struct _UDEVMAN
 	libusb_context* context;
 	HANDLE thread;
 	BOOL running;
-};
+} UDEVMAN;
 typedef UDEVMAN* PUDEVMAN;
 
 static BOOL poll_libusb_events(UDEVMAN* udevman);
@@ -198,7 +194,8 @@ static size_t udevman_register_udevice(IUDEVMAN* idevman, BYTE bus_number, BYTE 
 		if (num == 0)
 		{
 			WLog_Print(urbdrc->log, WLOG_WARN,
-			           "Could not find or redirect any usb devices by id %04x:%04x", idVendor, idProduct);
+			           "Could not find or redirect any usb devices by id %04x:%04x", idVendor,
+			           idProduct);
 		}
 
 		for (i = 0; i < num; i++)
@@ -511,12 +508,7 @@ static BOOL filter_by_class(uint8_t bDeviceClass, uint8_t bDeviceSubClass)
 
 static BOOL append(char* dst, size_t length, const char* src)
 {
-	size_t slen = strlen(src);
-	size_t dlen = strnlen(dst, length);
-	if (dlen + slen >= length)
-		return FALSE;
-	strcat(dst, src);
-	return TRUE;
+	return winpr_str_append(src, dst, length, NULL);
 }
 
 static BOOL device_is_filtered(struct libusb_device* dev,
@@ -586,8 +578,8 @@ static BOOL device_is_filtered(struct libusb_device* dev,
 	return filtered;
 }
 
-static int hotplug_callback(struct libusb_context* ctx, struct libusb_device* dev,
-                            libusb_hotplug_event event, void* user_data)
+static int LIBUSB_CALL hotplug_callback(struct libusb_context* ctx, struct libusb_device* dev,
+                                        libusb_hotplug_event event, void* user_data)
 {
 	VID_PID_PAIR pair;
 	struct libusb_device_descriptor desc;
@@ -866,7 +858,7 @@ static BOOL poll_libusb_events(UDEVMAN* udevman)
 	return rc > 0;
 }
 
-static DWORD poll_thread(LPVOID lpThreadParameter)
+static DWORD WINAPI poll_thread(LPVOID lpThreadParameter)
 {
 	libusb_hotplug_callback_handle handle = 0;
 	UDEVMAN* udevman = (UDEVMAN*)lpThreadParameter;
@@ -903,12 +895,7 @@ static DWORD poll_thread(LPVOID lpThreadParameter)
 	return 0;
 }
 
-#ifdef BUILTIN_CHANNELS
-#define freerdp_urbdrc_client_subsystem_entry libusb_freerdp_urbdrc_client_subsystem_entry
-#else
-#define freerdp_urbdrc_client_subsystem_entry FREERDP_API freerdp_urbdrc_client_subsystem_entry
-#endif
-UINT freerdp_urbdrc_client_subsystem_entry(PFREERDP_URBDRC_SERVICE_ENTRY_POINTS pEntryPoints)
+UINT libusb_freerdp_urbdrc_client_subsystem_entry(PFREERDP_URBDRC_SERVICE_ENTRY_POINTS pEntryPoints)
 {
 	wObject* obj;
 	UINT rc;
@@ -930,7 +917,7 @@ UINT freerdp_urbdrc_client_subsystem_entry(PFREERDP_URBDRC_SERVICE_ENTRY_POINTS 
 	udevman->next_device_id = BASE_USBDEVICE_NUM;
 	udevman->iface.plugin = pEntryPoints->plugin;
 	rc = libusb_init(&udevman->context);
-	
+
 	if (rc != LIBUSB_SUCCESS)
 		goto fail;
 

@@ -21,9 +21,7 @@
 
 /* GDI Brush Functions: http://msdn.microsoft.com/en-us/library/dd183395/ */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include <freerdp/config.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -819,8 +817,9 @@ const char* gdi_rop_to_string(UINT32 code)
 }
 
 /**
- * Create a new solid brush.\n
- * @msdn{dd183518}
+ * @brief Create a new solid brush.
+ * msdn{dd183518}
+ *
  * @param crColor brush color
  * @return new brush
  */
@@ -837,8 +836,9 @@ HGDI_BRUSH gdi_CreateSolidBrush(UINT32 crColor)
 	return hBrush;
 }
 /**
- * Create a new pattern brush.\n
- * @msdn{dd183508}
+ * @brief Create a new pattern brush.
+ * msdn{dd183508}
+ *
  * @param hbmp pattern bitmap
  * @return new brush
  */
@@ -854,6 +854,7 @@ HGDI_BRUSH gdi_CreatePatternBrush(HGDI_BITMAP hbmp)
 	hBrush->pattern = hbmp;
 	return hBrush;
 }
+
 HGDI_BRUSH gdi_CreateHatchBrush(HGDI_BITMAP hbmp)
 {
 	HGDI_BRUSH hBrush = (HGDI_BRUSH)calloc(1, sizeof(GDI_BRUSH));
