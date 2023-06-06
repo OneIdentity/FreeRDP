@@ -33,6 +33,7 @@
 #include <cups/cups.h>
 
 #include <winpr/crt.h>
+#include <winpr/file.h>
 #include <winpr/string.h>
 
 #include <freerdp/channels/rdpdr.h>
@@ -92,7 +93,7 @@ static UINT printer_cups_write_printjob(rdpPrintJob* printjob, const BYTE* data,
 	{
 		FILE* fp;
 
-		fp = fopen((const char*)cups_printjob->printjob_object, "a+b");
+		fp = winpr_fopen((const char*)cups_printjob->printjob_object, "a+b");
 
 		if (!fp)
 			return ERROR_INTERNAL_ERROR;
@@ -402,8 +403,8 @@ FREERDP_API rdpPrinterDriver* freerdp_printer_client_subsystem_entry(void)
 		uniq_cups_driver->driver.ReleaseRef = printer_cups_release_ref_driver;
 
 		uniq_cups_driver->id_sequence = 1;
-		uniq_cups_driver->driver.AddRef(&uniq_cups_driver->driver);
 	}
+	uniq_cups_driver->driver.AddRef(&uniq_cups_driver->driver);
 
 	return &uniq_cups_driver->driver;
 }

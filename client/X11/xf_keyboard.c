@@ -60,7 +60,7 @@ static BOOL xf_keyboard_action_script_init(xfContext* xfc)
 	char* keyCombination;
 	char buffer[1024] = { 0 };
 	char command[1024] = { 0 };
-	xfc->actionScriptExists = PathFileExistsA(xfc->context.settings->ActionScript);
+	xfc->actionScriptExists = winpr_PathFileExists(xfc->context.settings->ActionScript);
 
 	if (!xfc->actionScriptExists)
 		return FALSE;
@@ -400,18 +400,19 @@ static int xf_keyboard_execute_action_script(xfContext* xfc, XF_MODIFIER_KEYS* m
 	}
 
 	if (mod->Shift)
-		strcat(combination, "Shift+");
+		winpr_str_append("Shift", combination, sizeof(combination), "+");
 
 	if (mod->Ctrl)
-		strcat(combination, "Ctrl+");
+		winpr_str_append("Ctrl", combination, sizeof(combination), "+");
 
 	if (mod->Alt)
-		strcat(combination, "Alt+");
+		winpr_str_append("Alt", combination, sizeof(combination), "+");
 
 	if (mod->Super)
-		strcat(combination, "Super+");
+		winpr_str_append("Super", combination, sizeof(combination), "+");
 
-	strcat(combination, keyStr);
+	winpr_str_append(keyStr, combination, sizeof(combination), NULL);
+
 	count = ArrayList_Count(xfc->keyCombinations);
 
 	for (index = 0; index < count; index++)

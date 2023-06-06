@@ -506,7 +506,10 @@ static BOOL libavcodec_init(H264_CONTEXT* h264)
 	}
 
 	h264->pSystemData = (void*)sys;
+
+#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(58, 137, 100)
 	avcodec_register_all();
+#endif
 
 	if (!h264->Compressor)
 	{
@@ -526,10 +529,12 @@ static BOOL libavcodec_init(H264_CONTEXT* h264)
 			goto EXCEPTION;
 		}
 
+#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(59, 18, 100)
 		if (sys->codecDecoder->capabilities & AV_CODEC_CAP_TRUNCATED)
 		{
 			sys->codecDecoderContext->flags |= AV_CODEC_FLAG_TRUNCATED;
 		}
+#endif
 
 #ifdef WITH_VAAPI
 

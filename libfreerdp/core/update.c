@@ -99,6 +99,13 @@ static BOOL update_read_bitmap_data(rdpUpdate* update, wStream* s, BITMAP_DATA* 
 	Stream_Read_UINT16(s, bitmapData->flags);
 	Stream_Read_UINT16(s, bitmapData->bitmapLength);
 
+	if ((bitmapData->width == 0) || (bitmapData->height == 0))
+	{
+		WLog_ERR(TAG, "Invalid BITMAP_DATA: width=%" PRIu16 ", height=%" PRIu16, bitmapData->width,
+		         bitmapData->height);
+		return FALSE;
+	}
+
 	if (bitmapData->flags & BITMAP_COMPRESSION)
 	{
 		if (!(bitmapData->flags & NO_BITMAP_COMPRESSION_HDR))
@@ -924,6 +931,7 @@ static BOOL _update_begin_paint(rdpContext* context)
 		return FALSE;
 
 	Stream_SealLength(s);
+	Stream_GetLength(s, update->offsetOrders);
 	Stream_Seek(s, 2); /* numberOrders (2 bytes) */
 	update->combineUpdates = TRUE;
 	update->numberOrders = 0;
@@ -934,16 +942,14 @@ static BOOL _update_begin_paint(rdpContext* context)
 static BOOL _update_end_paint(rdpContext* context)
 {
 	wStream* s;
-	int headerLength;
 	rdpUpdate* update = context->update;
 
 	if (!update->us)
 		return FALSE;
 
 	s = update->us;
-	headerLength = Stream_Length(s);
 	Stream_SealLength(s);
-	Stream_SetPosition(s, headerLength);
+	Stream_SetPosition(s, update->offsetOrders);
 	Stream_Write_UINT16(s, update->numberOrders); /* numberOrders (2 bytes) */
 	Stream_SetPosition(s, Stream_Length(s));
 
@@ -955,6 +961,7 @@ static BOOL _update_end_paint(rdpContext* context)
 
 	update->combineUpdates = FALSE;
 	update->numberOrders = 0;
+	update->offsetOrders = 0;
 	update->us = NULL;
 	Stream_Free(s, TRUE);
 	return TRUE;

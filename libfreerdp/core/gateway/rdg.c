@@ -139,6 +139,7 @@ typedef struct
 	WEBSOCKET_STATE state;
 	wStream* responseStreamBuffer;
 } rdg_http_websocket_context;
+
 typedef enum _CHUNK_STATE
 {
 	ChunkStateLenghHeader,
@@ -256,20 +257,18 @@ static const char* flags_to_string(UINT32 flags, const t_flag_mapping* map, size
 {
 	size_t x = 0;
 	static char buffer[1024] = { 0 };
-	char fields[12];
-	memset(buffer, 0, sizeof(buffer));
+	char fields[12] = { 0 };
 
 	for (x = 0; x < elements; x++)
 	{
-		if (buffer[0] != '\0')
-			strcat(buffer, "|");
+		const t_flag_mapping* cur = &map[x];
 
-		if ((map[x].code & flags) != 0)
-			strcat(buffer, map[x].name);
+		if ((cur->code & flags) != 0)
+			winpr_str_append(cur->name, buffer, sizeof(buffer), "|");
 	}
 
 	sprintf_s(fields, ARRAYSIZE(fields), " [%04" PRIx32 "]", flags);
-	strcat(buffer, fields);
+	winpr_str_append(fields, buffer, sizeof(buffer), NULL);
 	return buffer;
 }
 
@@ -308,10 +307,15 @@ static BOOL rdg_read_http_unicode_string(wStream* s, const WCHAR** string, UINT1
 {
 	WCHAR* str;
 	UINT16 strLenBytes;
+	size_t rem = Stream_GetRemainingLength(s);
 
 	/* Read length of the string */
-	if (Stream_GetRemainingLength(s) < 4)
+	if (rem < 4)
+	{
+		WLog_ERR(TAG, "[%s]: Could not read stream length, only have % " PRIuz " bytes",
+		         __FUNCTION__, rem);
 		return FALSE;
+	}
 	Stream_Read_UINT16(s, strLenBytes);
 
 	/* Remember position of our string */
@@ -319,7 +323,12 @@ static BOOL rdg_read_http_unicode_string(wStream* s, const WCHAR** string, UINT1
 
 	/* seek past the string - if this fails something is wrong */
 	if (!Stream_SafeSeek(s, strLenBytes))
+	{
+		WLog_ERR(TAG,
+		         "[%s]: Could not read stream data, only have % " PRIuz " bytes, expected %" PRIu16,
+		         __FUNCTION__, rem - 4, strLenBytes);
 		return FALSE;
+	}
 
 	/* return the string data (if wanted) */
 	if (string)
@@ -349,12 +358,15 @@ static BOOL rdg_write_chunked(BIO* bio, wStream* sPacket)
 	len = Stream_Length(sChunk);
 
 	if (len > INT_MAX)
+	{
+		Stream_Free(sChunk, TRUE);
 		return FALSE;
+	}
 
 	status = BIO_write(bio, Stream_Buffer(sChunk), (int)len);
 	Stream_Free(sChunk, TRUE);
 
-	if (status != len)
+	if (status != (SSIZE_T)len)
 		return FALSE;
 
 	return TRUE;
@@ -428,7 +440,7 @@ static BOOL rdg_write_websocket(BIO* bio, wStream* sPacket, WEBSOCKET_OPCODE opc
 	status = BIO_write(bio, Stream_Buffer(sWS), Stream_Length(sWS));
 	Stream_Free(sWS, TRUE);
 
-	if (status != fullLen)
+	if (status != (SSIZE_T)fullLen)
 		return FALSE;
 
 	return TRUE;
@@ -550,11 +562,13 @@ static BOOL rdg_websocket_reply_close(BIO* bio, wStream* s)
 	{
 		uint16_t data;
 		Stream_Read_UINT16(s, data);
-		Stream_Write_UINT16(s, data ^ maskingKey1);
+		Stream_Write_UINT16(closeFrame, data ^ maskingKey1);
 	}
 	Stream_SealLength(closeFrame);
 
 	status = BIO_write(bio, Stream_Buffer(closeFrame), Stream_Length(closeFrame));
+	Stream_Free(closeFrame, TRUE);
+
 	/* server MUST close socket now. The server is not allowed anymore to
 	 * send frames but if he does, nothing bad would happen */
 	if (status < 0)
@@ -733,7 +747,6 @@ static int rdg_websocket_read(BIO* bio, BYTE* pBuffer, size_t size,
 				    TAG, "Websocket Server sends data with masking key. This is against RFC 6455.");
 				return -1;
 			}
-			break;
 			case WebSocketStatePayload:
 			{
 				status = rdg_websocket_handle_payload(bio, pBuffer, size, encodingContext);
@@ -752,6 +765,7 @@ static int rdg_websocket_read(BIO* bio, BYTE* pBuffer, size_t size,
 	/* should be unreachable */
 	return -1;
 }
+
 static int rdg_chuncked_read(BIO* bio, BYTE* pBuffer, size_t size,
                              rdg_http_encoding_chunked_context* encodingContext)
 {
@@ -823,9 +837,7 @@ static int rdg_chuncked_read(BIO* bio, BYTE* pBuffer, size_t size,
 					else
 						return (effectiveDataLen > 0 ? effectiveDataLen : status);
 				}
-
 				*dst = '\0';
-
 				/* strtoul is tricky, error are reported via errno, we also need
 				 * to ensure the result does not overflow */
 				errno = 0;
@@ -859,10 +871,12 @@ static int rdg_socket_read(BIO* bio, BYTE* pBuffer, size_t size,
                            rdg_http_encoding_context* encodingContext)
 {
 	assert(encodingContext != NULL);
+
 	if (encodingContext->isWebsocketTransport)
 	{
 		return rdg_websocket_read(bio, pBuffer, size, &encodingContext->context.websocket);
 	}
+
 	switch (encodingContext->httpTransferEncoding)
 	{
 		case TransferEncodingIdentity:
@@ -872,7 +886,6 @@ static int rdg_socket_read(BIO* bio, BYTE* pBuffer, size_t size,
 		default:
 			return -1;
 	}
-	return -1; /* should not be reached */
 }
 
 static BOOL rdg_read_all(rdpTls* tls, BYTE* buffer, size_t size,
@@ -884,7 +897,6 @@ static BOOL rdg_read_all(rdpTls* tls, BYTE* buffer, size_t size,
 	while (readCount < size)
 	{
 		int status = rdg_socket_read(tls->bio, pBuffer, size - readCount, transferEncoding);
-
 		if (status <= 0)
 		{
 			if (!BIO_should_retry(tls->bio))
@@ -1160,7 +1172,7 @@ static wStream* rdg_build_http_request(rdpRdg* rdg, const char* method,
 			goto out;
 	}
 
-		http_request_set_transfer_encoding(request, transferEncoding);
+	http_request_set_transfer_encoding(request, transferEncoding);
 
 	s = http_request_write(rdg->http, request);
 out:
@@ -1295,7 +1307,7 @@ static BOOL rdg_process_tunnel_response_optional(rdpRdg* rdg, wStream* s, UINT16
 		/* Seek over tunnelId (4 bytes) */
 		if (!Stream_SafeSeek(s, 4))
 		{
-			WLog_ERR(TAG, "[%s] Short packet %" PRIuz ", expected 4", __FUNCTION__,
+			WLog_ERR(TAG, "[%s] Short tunnelId, got %" PRIuz ", expected 4", __FUNCTION__,
 			         Stream_GetRemainingLength(s));
 			return FALSE;
 		}
@@ -1306,7 +1318,7 @@ static BOOL rdg_process_tunnel_response_optional(rdpRdg* rdg, wStream* s, UINT16
 		UINT32 caps;
 		if (Stream_GetRemainingLength(s) < 4)
 		{
-			WLog_ERR(TAG, "[%s] Short packet %" PRIuz ", expected 4", __FUNCTION__,
+			WLog_ERR(TAG, "[%s] Short capsFlags, got %" PRIuz ", expected 4", __FUNCTION__,
 			         Stream_GetRemainingLength(s));
 			return FALSE;
 		}
@@ -1320,7 +1332,7 @@ static BOOL rdg_process_tunnel_response_optional(rdpRdg* rdg, wStream* s, UINT16
 		/* Seek over nonce (20 bytes) */
 		if (!Stream_SafeSeek(s, 20))
 		{
-			WLog_ERR(TAG, "[%s] Short packet %" PRIuz ", expected 20", __FUNCTION__,
+			WLog_ERR(TAG, "[%s] Short nonce, got %" PRIuz ", expected 20", __FUNCTION__,
 			         Stream_GetRemainingLength(s));
 			return FALSE;
 		}
@@ -1328,7 +1340,7 @@ static BOOL rdg_process_tunnel_response_optional(rdpRdg* rdg, wStream* s, UINT16
 		/* Read serverCert */
 		if (!rdg_read_http_unicode_string(s, NULL, NULL))
 		{
-			WLog_ERR(TAG, "[%s] Failed to read string", __FUNCTION__);
+			WLog_ERR(TAG, "[%s] Failed to read server certificate", __FUNCTION__);
 			return FALSE;
 		}
 	}
@@ -1345,7 +1357,7 @@ static BOOL rdg_process_tunnel_response_optional(rdpRdg* rdg, wStream* s, UINT16
 		/* Read message string and invoke callback */
 		if (!rdg_read_http_unicode_string(s, &msg, &msgLenBytes))
 		{
-			WLog_ERR(TAG, "[%s] Failed to read string", __FUNCTION__);
+			WLog_ERR(TAG, "[%s] Failed to read consent message", __FUNCTION__);
 			return FALSE;
 		}
 
@@ -1843,7 +1855,6 @@ static BOOL rdg_establish_data_connection(rdpRdg* rdg, rdpTls* tls, const char* 
 			rdg->transferEncoding.context.websocket.responseStreamBuffer = NULL;
 
 			return TRUE;
-			break;
 		default:
 			return FALSE;
 	}
@@ -1890,6 +1901,9 @@ static BOOL rdg_tunnel_connect(rdpRdg* rdg)
 
 		if (!status)
 		{
+			assert(rdg);
+			assert(rdg->context);
+			assert(rdg->context->rdp);
 			rdg->context->rdp->transport->layer = TRANSPORT_LAYER_CLOSED;
 			return FALSE;
 		}
@@ -1928,6 +1942,9 @@ BOOL rdg_connect(rdpRdg* rdg, DWORD timeout, BOOL* rpcFallback)
 
 	if (!status)
 	{
+		assert(rdg);
+		assert(rdg->context);
+		assert(rdg->context->rdp);
 		rdg->context->rdp->transport->layer = TRANSPORT_LAYER_CLOSED;
 		return FALSE;
 	}
@@ -2004,7 +2021,7 @@ static int rdg_write_websocket_data_packet(rdpRdg* rdg, const BYTE* buf, int isi
 	/* mask as much as possible with 32bit access */
 	for (streamPos = 0; streamPos + 4 <= isize; streamPos += 4)
 	{
-		uint32_t masked = *((uint32_t*)((BYTE*)buf + streamPos)) ^ maskingKey;
+		uint32_t masked = *((const uint32_t*)((const BYTE*)buf + streamPos)) ^ maskingKey;
 		Stream_Write_UINT32(sWS, masked);
 	}
 
@@ -2012,7 +2029,7 @@ static int rdg_write_websocket_data_packet(rdpRdg* rdg, const BYTE* buf, int isi
 	for (; streamPos < isize; streamPos++)
 	{
 		BYTE* partialMask = (BYTE*)(&maskingKey) + streamPos % 4;
-		BYTE masked = *((BYTE*)((BYTE*)buf + streamPos)) ^ *partialMask;
+		BYTE masked = *((const BYTE*)((const BYTE*)buf + streamPos)) ^ *partialMask;
 		Stream_Write_UINT8(sWS, masked);
 	}
 
@@ -2059,7 +2076,10 @@ static int rdg_write_chunked_data_packet(rdpRdg* rdg, const BYTE* buf, int isize
 	len = Stream_Length(sChunk);
 
 	if (len > INT_MAX)
+	{
+		Stream_Free(sChunk, TRUE);
 		return -1;
+	}
 
 	status = tls_write_all(rdg->tlsIn, Stream_Buffer(sChunk), (int)len);
 	Stream_Free(sChunk, TRUE);
@@ -2080,8 +2100,6 @@ static int rdg_write_data_packet(rdpRdg* rdg, const BYTE* buf, int isize)
 	}
 	else
 		return rdg_write_chunked_data_packet(rdg, buf, isize);
-
-	return -1;
 }
 
 static BOOL rdg_process_close_packet(rdpRdg* rdg, wStream* s)
@@ -2393,10 +2411,10 @@ static int rdg_bio_gets(BIO* bio, char* str, int size)
 	return -2;
 }
 
-static long rdg_bio_ctrl(BIO* bio, int cmd, long arg1, void* arg2)
+static long rdg_bio_ctrl(BIO* in_bio, int cmd, long arg1, void* arg2)
 {
 	long status = -1;
-	rdpRdg* rdg = (rdpRdg*)BIO_get_data(bio);
+	rdpRdg* rdg = (rdpRdg*)BIO_get_data(in_bio);
 	rdpTls* tlsOut = rdg->tlsOut;
 	rdpTls* tlsIn = rdg->tlsIn;
 
@@ -2413,42 +2431,42 @@ static long rdg_bio_ctrl(BIO* bio, int cmd, long arg1, void* arg2)
 	}
 	else if (cmd == BIO_C_READ_BLOCKED)
 	{
-		BIO* bio = tlsOut->bio;
-		status = BIO_read_blocked(bio);
+		BIO* cbio = tlsOut->bio;
+		status = BIO_read_blocked(cbio);
 	}
 	else if (cmd == BIO_C_WRITE_BLOCKED)
 	{
-		BIO* bio = tlsIn->bio;
+		BIO* cbio = tlsIn->bio;
 
 		if (rdg->transferEncoding.isWebsocketTransport)
-			bio = tlsOut->bio;
+			cbio = tlsOut->bio;
 
-		status = BIO_write_blocked(bio);
+		status = BIO_write_blocked(cbio);
 	}
 	else if (cmd == BIO_C_WAIT_READ)
 	{
 		int timeout = (int)arg1;
-		BIO* bio = tlsOut->bio;
+		BIO* cbio = tlsOut->bio;
 
-		if (BIO_read_blocked(bio))
-			return BIO_wait_read(bio, timeout);
-		else if (BIO_write_blocked(bio))
-			return BIO_wait_write(bio, timeout);
+		if (BIO_read_blocked(cbio))
+			return BIO_wait_read(cbio, timeout);
+		else if (BIO_write_blocked(cbio))
+			return BIO_wait_write(cbio, timeout);
 		else
 			status = 1;
 	}
 	else if (cmd == BIO_C_WAIT_WRITE)
 	{
 		int timeout = (int)arg1;
-		BIO* bio = tlsIn->bio;
+		BIO* cbio = tlsIn->bio;
 
 		if (rdg->transferEncoding.isWebsocketTransport)
-			bio = tlsOut->bio;
+			cbio = tlsOut->bio;
 
-		if (BIO_write_blocked(bio))
-			status = BIO_wait_write(bio, timeout);
-		else if (BIO_read_blocked(bio))
-			status = BIO_wait_read(bio, timeout);
+		if (BIO_write_blocked(cbio))
+			status = BIO_wait_write(cbio, timeout);
+		else if (BIO_read_blocked(cbio))
+			status = BIO_wait_read(cbio, timeout);
 		else
 			status = 1;
 	}
@@ -2464,7 +2482,23 @@ static long rdg_bio_ctrl(BIO* bio, int cmd, long arg1, void* arg2)
 		 */
 		status = BIO_ctrl(tlsOut->bio, cmd, arg1, arg2);
 	}
-
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+	else if (cmd == BIO_CTRL_GET_KTLS_SEND)
+	{
+		/* Even though BIO_get_ktls_send says that returning negative values is valid
+		 * openssl internal sources are full of if(!BIO_get_ktls_send && ) stuff. This has some
+		 * nasty sideeffects. return 0 as proper no KTLS offloading flag
+		 */
+		status = 0;
+	}
+	else if (cmd == BIO_CTRL_GET_KTLS_RECV)
+	{
+		/* Even though BIO_get_ktls_recv says that returning negative values is valid
+		 * there is no reason to trust  trust negative values are implemented right everywhere
+		 */
+		status = 0;
+	}
+#endif
 	return status;
 }
 
@@ -2610,6 +2644,7 @@ void rdg_free(rdpRdg* rdg)
 		BIO_free_all(rdg->frontBio);
 
 	DeleteCriticalSection(&rdg->writeSection);
+
 	if (rdg->transferEncoding.isWebsocketTransport)
 	{
 		if (rdg->transferEncoding.context.websocket.responseStreamBuffer != NULL)
